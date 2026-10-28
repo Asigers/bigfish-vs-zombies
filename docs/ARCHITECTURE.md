@@ -34,7 +34,7 @@ Any stale/invalid action is discarded; native Bridge revalidates all terrain/col
 
 ## Official Douyin prerequisites (mandatory)
 
-The platform's live-play comment feed is not an unrestricted public-room WebSocket.
+The platform's live-play comment feed is not an unrestricted public-room WebSocket. NOTE: Douyin's official live-play approval rules for games derived from existing IP require appropriate IP authorization and regulatory documentation. Owning original PvZ game files does not meet that requirement. Confirm rights and approval with the platform before presenting this as a publishable official live-play product.
 It requires developer identity approval, submitted and approved gameplay proposal, AppID, live-play comment capability, configured push callback, a mounted live-play app and a started data-push task.
 
 Official callback protocol: HTTP POST with x-nonce-str, x-timestamp (milliseconds), x-roomid, x-msg-type, x-signature; signature is base64(MD5(sorted signed headers + raw body + configured secret)). This is **different** from the RSA-SHA256 signing method used by platform OpenAPI requests. Verify before normalizing. The initial src/douyin-events.mjs is only a schema normalizer and must only receive events from an authenticated gateway.

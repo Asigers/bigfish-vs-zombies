@@ -31,6 +31,11 @@ export class PvzBridgeClient {
     const after=await this.snapshot();
     if(after.gameId!==state.gameId||after.revision<=state.revision)
       throw Error("Ambiguous action: require manual state reconciliation");
+    if(receipt.status!=="applied")throw Error("Native action was not applied");
+    const confirmed=action.type==="plant"
+      ?(after.plants||[]).some(p=>p.row===action.row&&p.col===action.col&&p.type===action.plant)
+      :action.type==="collect_sun" ?!(after.suns||[]).some(s=>s.id===action.id):false;
+    if(!confirmed)throw Error("Action not confirmed in fresh game state");
     return {receipt,after};
   }
 }

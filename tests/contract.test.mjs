@@ -36,6 +36,12 @@ test("snapshots reject out-of-contract engine output", () => {
   assert.throws(() => snapshot({revision: -1}), ContractError)
 })
 
+test("a zombie past the house is still a valid observation", () => {
+  const state = snapshot({zombies: [{type: "normal", row: 2, x: -3.4, health: 120}]})
+  assert.equal(state.zombies[0].x, -3.4)
+  assert.throws(() => snapshot({zombies: [{type: "normal", row: 2, x: -9, health: 120}]}), ContractError)
+})
+
 test("revision must never rewind", () => {
   const first = snapshot({revision: 5})
   const second = snapshot({revision: 6})

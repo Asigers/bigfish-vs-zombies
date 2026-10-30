@@ -127,7 +127,9 @@ export function normalizeSnapshot(raw) {
     return {
       type: text(zombie.type, `${at}.type`, {max: 32}),
       row: insideRow(zombie.row, `${at}.row`),
-      x: num(zombie.x, `${at}.x`, {min: -2, max: columns + 20}),
+      // Zombies keep walking left past the house before the mower fires; the
+      // engine can report several cells of overshoot.
+      x: num(zombie.x, `${at}.x`, {min: -8, max: columns + 20}),
       health: int(zombie.health, `${at}.health`)
     }
   })

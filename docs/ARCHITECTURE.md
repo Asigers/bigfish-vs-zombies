@@ -1,81 +1,139 @@
-# BigFish vs Zombies — M0 / M1 / M2 architecture
+# Architecture
 
-Status: **development foundation, not M0-M2 acceptance complete**.
+Status: control layer implemented and tested; native bridge implemented and
+compiled into PvZ-Portable; real-game acceptance blocked (see M0-STATUS.md).
 
-## Goals
+## 1. Layers
 
-Mac plays PvZ-Portable without manual mouse control. Viewers interact via **approved Douyin live-play comments**, with votes and questions that change verified gameplay and narration. BigFish Pi controls tactics, not the native memory or OS.
+```
+┌──────────────────────────────────────────────────────────────┐
+│ presentation (not built yet)                                 │
+│   OBS scene, Live2D overlay, TTS, vote widget                │
+└───────────────▲──────────────────────────────────────────────┘
+                │ events: narration, vote, command_verified
+┌───────────────┴──────────────────────────────────────────────┐
+│ controller (Node 22)                                          │
+│                                                               │
+│  Orchestrator ── one bounded cycle ──────────────────────┐    │
+│   1 read snapshot (retryable, bounded)                   │    │
+│   2 reconcile pending command against fresh state        │    │
+│   3 terminal states: lost / won / level advance          │    │
+│   4 urgent sun → emergency defence → agent → bank sun    │    │
+│                                                          │    │
+│  ActionExecutor: single-flight, at-most-once, verified   │    │
+│  Policy: legal action enumeration, scoring, validation   │    │
+│  Journal: append-only JSONL audit + restart recovery     │    │
+│  AudienceDirector: polls, dedupe, challenges             │    │
+└───────────────▲──────────────────────────────────────────────┘
+                │ HTTP/1.1 on 127.0.0.1, bearer token
+┌───────────────┴──────────────────────────────────────────────┐
+│ native bridge (inside the game process)                      │
+│  HttpServer  ─ parse, authenticate, enqueue, wait            │
+│  BridgeCore  ─ revision, dedupe by commandId, receipts,      │
+│                at most ONE command per game frame            │
+│  PvzFacade   ─ Capture() + engine calls on the game thread   │
+│  hook        ─ bigfish::PumpBridge(this) in UpdateFrames()   │
+└───────────────▲──────────────────────────────────────────────┘
+                │ in-process calls only
+        PvZ-Portable (engine, renderer, collision, waves, saves)
+```
 
-## Topology
+Two rules make the topology safe:
 
-1. PvZ-Portable C++ remains the sole game engine, renderer, collision and wave logic.
-2. An embedded C++ bridge (to be written) reports authoritative public board state and executes validated commands on the native game thread.
-3. A Node 22 controller running on the same Mac performs game polling, deterministic sun collection and emergency behavior.
-4. Pi SDK: tactical session sees only reduced snapshots and picks one enumerated legal action; a separate no-tools narrator produces Chinese commentary.
-5. InteractionDirector receives normalized Douyin audience events and chooses from feasible actions or challenges.
-6. OBS captures game window, transparent Live2D overlay, commentary, votes and outcomes.
+- **The Mac bridge only listens on loopback.** There is no inbound path from the
+  internet, and the token is required on every request.
+- **The game thread owns all state.** HTTP threads never touch a `Board`; they can
+  only enqueue a command and wait for the game thread's receipt.
 
-Douyin transport: approved live-play -> official signed HTTP callback -> HTTPS cloud relay -> authenticated outbound connection from Mac -> InteractionDirector. The Mac bridge binds only to loopback and is never published on the internet.
+## 2. Control cycle
 
-## Model observation
+`Orchestrator.step()` is the only place that decides. It is idempotent with respect
+to state: everything it needs is re-read each cycle.
 
-Visible projection: gameId, revision, current level/wave, sun, rows/columns, currently present plant types and grid locations, currently present zombie types/positions/HP, available seed cards and cooldown, collectable suns. Add an opt-in bounded audience vote, verified recent game receipts and a concise strategy journal. Exclude future unrevealed waves, raw memory, arbitrary filesystem and unfiltered chat.
+1. **Read.** `game.snapshot()` → `normalizeSnapshot`. Reads may be retried; a
+   revision that moves backwards is a hard contract error.
+2. **Reconcile.** `ActionExecutor.observe(snapshot)` resolves the previous command:
+   the observable effect is present → `verified`; absent after N revisions →
+   `abandoned`. Nothing is retried.
+3. **Terminal handling.** `lost` ends the session. `won` emits `next_level` on the
+   wire (this is the only "no model" level decision) or finishes the campaign.
+4. **Priority ladder.** urgent sun (about to expire) → emergency defence near the
+   house → agent choice → opportunistic sun banking. A cycle issues **at most one**
+   command, because confirming it needs a later snapshot.
+5. **Narration** reacts to verified events only, rate-limited, and never blocks the
+   loop.
 
-The model receives a shortlist of **legal actions** with numeric indices. It responds with JSON, e.g. {"index":0,"speech":"先保住第三路"}.
-Any stale/invalid action is discarded; native Bridge revalidates all terrain/collision/economy rules. Only success verified from fresh game state counts as action completion. No model call blocks game frames.
+## 3. Invariants
 
-## First interaction features
+| # | Invariant | Enforced by | Test |
+|---|---|---|---|
+| I1 | An action is only sent if it is legal for the observed revision | `policy/contract.validateAction` | `contract.test.mjs` |
+| I2 | At most one command is in flight | `ActionExecutor.pending` | `executor.test.mjs` |
+| I3 | A command id is never replayed | executor + bridge dedupe map | `executor.test.mjs`, `core_test.cpp` |
+| I4 | Success requires the effect in a fresh snapshot | `effectVisible` + `revisionAfter` | `executor.test.mjs` |
+| I5 | Revisions never decrease; applied commands advance them | contract + bridge `Commit` | `contract.test.mjs`, `core_test.cpp` |
+| I6 | Model output can only select an offered index | policy + `#decide` | `contract.test.mjs` |
+| I7 | Audience bans are re-checked at the engine | policy + `BridgeCore::Validate` | `contract.test.mjs`, `core_test.cpp` |
+| I8 | A stalled lane is not fed plants forever | `lost()` in the agent + emergency guard | `campaign.test.mjs` |
+| I9 | Stuck detection stops a runaway session | `maxCommandsPerLevel` | `campaign.test.mjs` |
 
-- A 12-second vote with 2-4 current feasible options, one user per round, dedup by messageId.
-- Audience chat begins with a recognized command prefix to request an answer; sampling and rate limits prevent speech overload.
-- Challenges ban specific plants or restrict resource spending; bans must be enforced by the executor and Bridge, not merely promised by the LLM.
-- With no audience, BigFish continues without inventing votes.
-- An unexpectedly impossible winning vote must be acknowledged as unavailable rather than silently faked.
+The native side re-validates every action: bounds, occupancy, card presence,
+cooldown and sun. Even a compromised controller cannot plant into an occupied cell
+or spend sun it does not have.
 
-## Official Douyin prerequisites (mandatory)
+## 4. Failure model
 
-The platform's live-play comment feed is not an unrestricted public-room WebSocket. NOTE: Douyin's official live-play approval rules for games derived from existing IP require appropriate IP authorization and regulatory documentation. Owning original PvZ game files does not meet that requirement. Confirm rights and approval with the platform before presenting this as a publishable official live-play product.
-It requires developer identity approval, submitted and approved gameplay proposal, AppID, live-play comment capability, configured push callback, a mounted live-play app and a started data-push task.
+| Failure | Client behaviour | Engine contract |
+|---|---|---|
+| Connection refused / 5xx / timeout | command becomes **ambiguous**; never resent | may have applied |
+| HTTP 4xx | deterministic reject, no retry | not applied |
+| Receipt `rejected` | journal + free slot | not applied |
+| Receipt `applied`, effect not visible yet | wait for a later snapshot | applied |
+| Effect never appears | abandon intent, resume from fresh state | unknown |
+| Bridge dies mid-session | loop keeps retrying reads, then stops after N failures | — |
+| Controller restarts | `pendingFromJournal` recovers the intent | — |
 
-Official callback protocol: HTTP POST with x-nonce-str, x-timestamp (milliseconds), x-roomid, x-msg-type, x-signature; signature is base64(MD5(sorted signed headers + raw body + configured secret)). This is **different** from the RSA-SHA256 signing method used by platform OpenAPI requests. Verify before normalizing. The initial src/douyin-events.mjs is only a schema normalizer and must only receive events from an authenticated gateway.
+`ambiguous` is the important case: a double-plant would waste sun and desync the
+journal, so the executor prefers to lose an action over duplicating one.
 
-A cloud callback receiver needs durable queueing, dedup, HTTPS, replay prevention, ACK tracking, source authentication, failure recovery and prompt responses (<2 s). Official live-play fulfilment reporting is required for production deployment. A platform-approved app/client arrangement must be tested: official live-play gameplay packages currently focus on Windows EXE and may require a Windows companion even if the PvZ engine and OBS live on Mac. Do not claim Mac-only Douyin official deployment without approval.
+## 5. Security
 
-Official documentation:
-- https://developer.open-douyin.com/docs/resource/zh-CN/interaction/introduction/zn/toybox-start
-- https://developer.open-douyin.com/docs/resource/zh-CN/interaction/develop/server/live-room-scope/data-open/data-open-desc
-- https://developer.open-douyin.com/docs/resource/zh-CN/interaction/jierushuoming/hudongshuju/pinglunshuju
-- https://developer.open-douyin.com/docs/resource/zh-CN/interaction/jierushuoming/pingtaijichu/msg-ack-ability
+- Bridge binds `127.0.0.1` only; rejects non-loopback client URLs as well.
+- Bearer token ≥ 16 chars from `BIGFISH_BRIDGE_TOKEN`; missing token disables the
+  bridge. Comparison is length-independent.
+- Request bodies capped at 64 KiB, headers at 8 KiB, response bodies at 256 KiB on
+  the client side; JSON depth capped at 16.
+- No tool/file/network access in either Pi session (`noTools: "all"`); unexpected
+  tools abort session creation.
+- Audience text is untrusted context: it never becomes a model instruction, and its
+  only effect is a validated vote or challenge.
+- Douyin callbacks must arrive through an authenticated gateway; the verifier is
+  defence in depth, not the primary boundary.
 
-## Gates
+## 6. Observation model
 
-### M0: real game
+The model sees `viewForModel(snapshot)`: level, wave, sun, bounded plant/zombie/card/
+sun lists, per-row threat summary. It never sees hidden future waves, raw memory,
+filesystem paths or unfiltered chat. Candidates arrive as an ordered array; the
+model answers `{"index":n,"speech":"…"}` and stale indices are rejected.
 
-- [ ] Build and run PvZ-Portable on actual Apple Silicon Mac, from legally sourced GOTY assets.
-- [ ] Embed native game-thread Bridge, exposing revisioned snapshots.
-- [ ] Execute seed selection, plant, collect sun, shovel and next level through real game mechanics.
-- [ ] Never retry ambiguously acknowledged actions; reconcile with the next snapshot.
-- [ ] Pass at least 10 levels and restart/save tests on the Mac.
+## 7. Douyin topology (M1, not built)
 
-### M1: Douyin audience
+```
+approved live-play room
+  → official signed callback (HTTP POST, <2s ACK)
+  → HTTPS cloud relay (durable queue, dedupe, replay protection)
+  → authenticated outbound connection initiated by the Mac
+  → AudienceDirector
+```
 
-- [x] Deterministic polling, one vote per viewer and message dedup.
-- [x] Initial official live-comment payload normalizer.
-- [ ] Authorized callback verification and cloud relay connected to Mac.
-- [ ] Douyin AppID and approved comment push data, real room vote modifies a native game action.
-- [ ] Official fulfilment reporting and platform tests pass.
-- [ ] Confirm approved Mac/Windows client deployment path.
+The Mac never exposes a public port. Official live-play packages currently target
+Windows EXE clients; the Mac+companion arrangement is unverified and must be
+confirmed with the platform before claiming official support.
 
-### M2: AI host
+## 8. Deliberate non-goals
 
-- [x] Bounded observable state and legal action contract.
-- [ ] Connect no-tools Pi SDK tactical agent and independent speech session.
-- [ ] Live2D / OBS / TTS integrated and licensed for intended use.
-- [ ] Audience questions answered from real game facts and completed game challenges.
-- [ ] All live events matched to verified game changes; sustained hands-free live session.
-
-## Rights
-
-Do not upload EA/PopCap copyrighted assets or a packaged original game's data.
-PvZ-Portable source carries LGPL-3.0-or-later obligations. Existing whale-girl
-Live2D art is noncommercial upstream and must be cleared before monetized streams.
+- No memory reading, no DLL injection, no OS-level input automation.
+- No retry of ambiguous actions.
+- No LLM authority over legality, economy, or challenges.
+- No packaged EA/PopCap assets in this repository.

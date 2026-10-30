@@ -1,0 +1,46 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b70d712..898da7b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -5,6 +5,8 @@ project(pvz-portable LANGUAGES C CXX)
+ include(CMake/ProjectVersion.cmake)
+ 
+ option(BUILD_STATIC "Statically link dependencies for a standalone exe (Windows MinGW, Linux)" OFF)
++# BigFish vs Zombies: optional loopback control bridge (see bigfish-bridge/).
++option(BIGFISH_BRIDGE "Build the BigFish local control bridge" OFF)
+ if(BUILD_STATIC)
+ 	if(WIN32 AND NOT MSVC)
+ 		set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+@@ -185,6 +187,10 @@ else()
+ 	add_executable(pvz-portable ${SOURCES})
+ endif()
+ 
++if(BIGFISH_BRIDGE)
++	include(${CMAKE_CURRENT_SOURCE_DIR}/bigfish-bridge/Bridge.cmake)
++endif()
++
+ target_include_directories(pvz-portable PRIVATE
+ 	${PLAT_INCLUDES}
+ 	${PROJECT_BINARY_DIR}
+diff --git a/src/LawnApp.cpp b/src/LawnApp.cpp
+index 48ee9ff..c80db32 100644
+--- a/src/LawnApp.cpp
++++ b/src/LawnApp.cpp
+@@ -39,6 +39,7 @@
+ #include "Lawn/System/SaveGame.h"
+ #include "PvzpLib/PvzpDebug.h"
+ #include "PvzpLib/PvzpFoley.h"
++#include "Module.h"
+ #include "PvzpLib/Attachment.h"
+ #include "Lawn/System/PlayerInfo.h"
+ #include "Lawn/System/PoolEffect.h"
+@@ -1559,6 +1560,9 @@ void LawnApp::UpdateFrames()
+ 	UpdatePlayTimeStats();
+ #endif
+ 
++	// BigFish vs Zombies local bridge: at most one queued command per frame.
++	bigfish::PumpBridge(this);
++
+ 	int aUpdateCount = 1;
+ 	if (gSlowMo)
+ 	{

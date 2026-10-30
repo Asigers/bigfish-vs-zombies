@@ -1,0 +1,11 @@
+.state/
+node_modules/
+native/vendor/
+native/build/
+
+# PopCap/EA game data: never commit, never upload. Use your own purchased copy.
+main.pak
+properties/
+*.pak
+*.dmo
+user*.dat

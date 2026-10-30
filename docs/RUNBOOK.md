@@ -52,9 +52,23 @@ Prerequisites:
 loaded at boot). PvZ-Portable is an engine reimplementation, so it needs the data
 from a copy you own.
 
-- Buy PvZ GOTY (Steam app `3590`, or the EA store) and copy the files out of your
-  own install directory. Recommended: **1.2.0.1073 EN**; Steam 1.2.0.1096 works, and
-  `scripts/make-compat-overrides.py` in the upstream repo fixes cosmetic strings.
+- Buy PvZ GOTY (Steam app `3590`, ¥21 / $4.99, or the EA store) and copy the files
+  out of your own install directory. Recommended: **1.2.0.1073 EN**; Steam
+  1.2.0.1096 works, and `scripts/make-compat-overrides.py` in the upstream repo
+  fixes cosmetic strings.
+- The Steam listing does offer a macOS build, but it targets OS X 10.5.8–10.6.x and
+  is **32-bit**: macOS 10.15+ dropped 32-bit apps and Rosetta 2 does not translate
+  them, so that executable cannot launch on a current Mac. This does not matter
+  here — only the data files are needed, and the depot still downloads.
+- On Apple Silicon the reliable way to fetch the data is SteamCMD with the Windows
+  depot forced, since the Steam client refuses incompatible 32-bit titles:
+
+  ```bash
+  ./steamcmd.sh +force_install_dir ~/pvz-steam +login <account> \
+    +@sSteamCmdForcePlatformType windows +app_update 3590 validate +quit
+  ```
+
+  `~/pvz-steam` then contains `main.pak` and `properties/`.
 - Do **not** use repacks, "green" editions, cracked installers, APK dumps, files
   downloaded from asset-sharing sites, or a friend's copy. Those are not your
   licence, and they are the usual source of corrupted or missing data.

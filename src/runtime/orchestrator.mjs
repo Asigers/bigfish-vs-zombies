@@ -2,6 +2,7 @@ import {
   ACTION,
   ISSUE,
   STATUS,
+  actionKey,
   compareSnapshots,
   normalizeSnapshot,
   validateAction,
@@ -73,6 +74,8 @@ export class Orchestrator {
     this.lastSpeechAt = 0
     this.lastSpeech = ""
     this.levels = []
+    /** Actions the engine rejected at the current revision: never retried. */
+    this.rejections = {revision: -1, keys: new Set()}
     this.stats = {
       cycles: 0,
       verified: 0,
@@ -139,6 +142,9 @@ export class Orchestrator {
       this.#emit("engine_changed", {gameId: snapshot.gameId})
     }
     if (relation !== "same") this.#emit("snapshot", {revision: snapshot.revision, relation})
+    if (this.rejections.revision !== snapshot.revision) {
+      this.rejections = {revision: snapshot.revision, keys: new Set()}
+    }
     this.previous = snapshot
     this.snapshot = snapshot
   }
@@ -179,6 +185,16 @@ export class Orchestrator {
       return {state: "next_level"}
     }
 
+    // Bootstrapping: the title screen and the seed chooser each have exactly one
+    // legal move and never need the model.
+    if (snapshot.status === STATUS.MENU || snapshot.status === STATUS.INTRO) {
+      const bootstrap = candidates(snapshot, this.#challenge())[0]
+      if (!bootstrap) return {state: snapshot.status}
+      if (!this.executor.ready) return {state: "awaiting_reconcile"}
+      await this.#act(snapshot, bootstrap, {reason: "bootstrap"})
+      return {state: snapshot.status}
+    }
+
     if (snapshot.status !== STATUS.PLAYING) return {state: snapshot.status}
 
     if (this.stats.levelCommands >= this.config.maxCommandsPerLevel) {
@@ -189,7 +205,7 @@ export class Orchestrator {
       return {state: "throttled"}
     }
 
-    const offered = candidates(snapshot, this.#challenge())
+    const offered = this.#filterRejected(candidates(snapshot, this.#challenge()))
 
     // 1. A sun about to rot always wins a cycle.
     const urgentSun = this.#pickSun(snapshot, {urgent: true})
@@ -231,6 +247,11 @@ export class Orchestrator {
     return {state: "acted"}
   }
 
+  #filterRejected(offered) {
+    if (!this.rejections.keys.size) return offered
+    return offered.filter((action) => !this.rejections.keys.has(actionKey(action)))
+  }
+
   #pickSun(snapshot, {urgent = false} = {}) {
     const suns = [...snapshot.suns].sort((a, b) => (a.expiresInMs ?? 1e9) - (b.expiresInMs ?? 1e9))
     if (urgent) {
@@ -251,7 +272,7 @@ export class Orchestrator {
     // plant after another; let the mower reset it instead.
     const threatened = threatRows(snapshot).filter((t) => t.closestX < this.config.emergencyX && t.closestX >= 1.5)
     if (!threatened.length) return null
-    const offered = candidates(snapshot, challenge)
+    const offered = this.#filterRejected(candidates(snapshot, challenge))
     const shooters = (row) => snapshot.plants.filter((p) => p.row === row && (p.type === "peashooter" || p.type === "snowpea"))
 
     // No shooter in the lane: a wall buys nothing, add damage.
@@ -307,6 +328,9 @@ export class Orchestrator {
     this.lastActionAt = this.clock.now()
     this.stats.levelCommands += 1
     if (result.outcome === OUTCOME.REJECTED) {
+      // Do not burn cycles re-sending an action the engine already refused for
+      // this revision; wait for the world to move instead.
+      this.rejections.keys.add(actionKey(action))
       this.#emit("command_rejected", {action, issue: result.issue, reason})
     }
     if (result.outcome === OUTCOME.AMBIGUOUS) this.stats.ambiguous += 1

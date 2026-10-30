@@ -4,25 +4,27 @@ Mac-first autonomous **Plants vs. Zombies** streamer: BigFish (a Pi-powered on-a
 character) plays PvZ-Portable through a closed control loop while audience votes and
 challenges change real, verified gameplay.
 
-**Status: control layer complete and tested; native bridge implemented and compiled
-into PvZ-Portable; real-game acceptance is blocked by missing game assets.**
-See [docs/M0-STATUS.md](docs/M0-STATUS.md) for the honest gate-by-gate evidence.
+**Status: the controller plays the real game.** With a purchased PvZ GOTY asset set
+on this Mac it boots PvZ-Portable, chooses seeds, plants, collects sun and advances
+levels without human input (levels 1–2 cleared end to end so far). See
+[docs/M0-STATUS.md](docs/M0-STATUS.md) for gate-by-gate evidence.
 
 ## What works today
 
 | Layer | State | Evidence |
 |---|---|---|
 | Control loop, policy, executor, journal | working | 48 Node tests |
-| Native bridge protocol + HTTP server | working | 28 native checks |
+| Native bridge protocol + HTTP server | working | 32 native checks |
 | PvZ-Portable facade (plant/sun/shovel/next level) | compiles against upstream headers | `scripts/native-check.sh` |
 | Simulated 10-level campaign, end to end | passes | `tests/campaign.test.mjs` |
-| Real game on this Mac | **blocked**: no legally owned `main.pak` present | `docs/M0-STATUS.md` |
+| Real-game levels 1–2 (seed choice → win → next level) | cleared unattended | `docs/M0-STATUS.md` |
+| Real game on this Mac | **working**: boots, plays, clears levels | `docs/M0-STATUS.md` |
 | Douyin gateway, OBS/Live2D, TTS | not implemented | `docs/ARCHITECTURE.md` |
 
 ## Quick start
 
 ```bash
-npm test                    # Node contract, executor, sim, campaign, bridge tests
+npm test                    # Node contract, executor, sim, campaign, bridge tests (50)
 npm run sim                 # offline 10-level campaign (virtual clock, no assets)
 npm run sim -- --seed=11    # deterministic scenario variant
 

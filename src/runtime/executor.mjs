@@ -30,6 +30,10 @@ export function effectVisible(snapshot, action, {level} = {}) {
       return !snapshot.plants.some((p) => p.row === action.row && p.col === action.col)
     case ACTION.NEXT_LEVEL:
       return snapshot.level > (level ?? snapshot.level) || snapshot.status !== "won"
+    case ACTION.ENTER_ADVENTURE:
+      return snapshot.status !== "menu"
+    case ACTION.CHOOSE_SEEDS:
+      return snapshot.status === "playing"
     default:
       return false
   }

@@ -1,6 +1,6 @@
 import {ACTION} from "../domain/contract.mjs"
 
-const SHOOTERS = new Set(["peashooter", "snowpea"])
+const SHOOTERS = new Set(["peashooter", "snowpea", "repeater", "chomper"])
 const HEAVY = new Set(["bucket", "cone", "gargantuar"])
 
 const SPEECH = {
@@ -36,11 +36,11 @@ export class HeuristicAgent {
     const closest = threats[0]
     const sunflowers = countType(snapshot, "sunflower")
     const shootersIn = (row) => snapshot.plants.filter((p) => p.row === row && SHOOTERS.has(p.type)).length
-    const safeRow = (a) => !threats.some((t) => t.row === a.row && t.x < 6)
+    const wallsIn = (row) => snapshot.plants.filter((p) => p.row === row && p.type === "wallnut").length
 
-    // A lane whose zombie is already chewing on the front plants cannot be
-    // saved by feeding it one replacement after another: let the mower work.
-    const lost = (row) => threats.some((t) => t.row === row && t.x < 2.6)
+    // Only a lane that is literally at the mower is written off; everything
+    // else still deserves a shooter.
+    const lost = (row) => threats.some((t) => t.row === row && t.x < 1.5)
     const legal = candidates.filter((a) => !(a.type === ACTION.PLANT && banned.has(a.plant)) && !lost(a.row))
 
     const pick = (predicate) => {
@@ -51,50 +51,46 @@ export class HeuristicAgent {
     const nextLevel = pick((a) => a.type === ACTION.NEXT_LEVEL)
     if (nextLevel) return nextLevel
 
-    // 1. A zombie at the door: block it, whatever the economy says.
-    if (closest && closest.x >= 2 && closest.x < 3.2) {
+    const liveThreats = threats.filter((t) => !lost(t.row))
+
+    // 1. Block the door when a lane has nothing to shoot with yet.
+    if (closest && closest.x >= 1.5 && closest.x < 3.2 && wallsIn(closest.row) === 0) {
       const wall = pick((a) => a.type === ACTION.PLANT && a.plant === "wallnut" && a.row === closest.row)
       if (wall) return wall
     }
 
-    // 2. Every lane with a zombie gets a shooter. If we cannot afford it yet,
-    //    wait: saving for coverage beats buying more economy.
-    const uncovered = threats.find((t) => shootersIn(t.row) === 0)
-    if (uncovered) {
-      const shooter = pick((a) => a.type === ACTION.PLANT && SHOOTERS.has(a.plant) && a.row === uncovered.row)
+    // 2. Firepower first: every live lane wants one shooter, two once a zombie
+    //    is within six cells. Closest lane wins when sun is tight.
+    for (const threat of liveThreats) {
+      const desired = threat.x < 6 ? 2 : 1
+      if (shootersIn(threat.row) >= desired) continue
+      const shooter = pick((a) => a.type === ACTION.PLANT && SHOOTERS.has(a.plant) && a.row === threat.row)
       if (shooter) return shooter
-      return null
     }
 
-    // 3. A lane carrying a big zombie needs a second shooter before more economy.
-    if (closest && !HEAVY.has(closest.type) === false) {
-      const thin = shootersIn(closest.row) < 2
-      if (thin) {
-        const shooter = pick((a) => a.type === ACTION.PLANT && SHOOTERS.has(a.plant) && a.row === closest.row)
-        if (shooter) return shooter
-      }
-    }
-
-    // 4. Economy, but only in a row that is not under pressure.
-    const economyTarget = Math.min(4, 2 + Math.floor(snapshot.level / 3))
+    // 3. Economy, preferring lanes without a zombie in the front half.
+    const economyTarget = Math.min(5, 2 + Math.floor(snapshot.level / 2))
     if (sunflowers < economyTarget) {
-      const sunflower = pick((a) => a.type === ACTION.PLANT && a.plant === "sunflower" && safeRow(a))
-      if (sunflower) return sunflower
+      const quiet = pick((a) => a.type === ACTION.PLANT && a.plant === "sunflower" &&
+        !threats.some((t) => t.row === a.row && t.x < 5))
+      if (quiet) return quiet
     }
 
-    // 5. Deepen the lane closest to the house.
-    if (closest) {
+    // 4. Deepen the front lane before the wave stacks up.
+    if (closest && shootersIn(closest.row) < 3) {
       const shooter = pick((a) => a.type === ACTION.PLANT && SHOOTERS.has(a.plant) && a.row === closest.row)
       if (shooter) return shooter
-      if (closest.x < 5) {
-        const wall = pick((a) => a.type === ACTION.PLANT && a.plant === "wallnut" && a.row === closest.row)
-        if (wall) return wall
-      }
     }
 
-    // 6. Fall back to the best-scored legal move.
-    const fallback = legal[0]
-    return fallback ? {index: candidates.indexOf(fallback), speech: this.#speech(fallback, snapshot)} : null
+    // 5. Sun is piling up: convert it into firepower or economy.
+    if (snapshot.sun >= 150) {
+      const any = pick((a) => a.type === ACTION.PLANT && (SHOOTERS.has(a.plant) || a.plant === "sunflower"))
+      if (any) return any
+    }
+
+    // 6. Nothing worth buying: wait. Sun collection is the controller's lane,
+    //    never a "choice" here, so the agent cannot silently skip defence.
+    return null
   }
 
   #speech(action, snapshot) {

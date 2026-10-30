@@ -84,6 +84,22 @@ public:
 		return Issue::NoPlant;
 	}
 
+	Issue EnterAdventure() override
+	{
+		if (state_.status != Status::Menu)
+			return Issue::NotPlaying;
+		state_.status = Status::Intro;
+		return Issue::None;
+	}
+
+	Issue ChooseSeeds() override
+	{
+		if (state_.status != Status::Intro)
+			return Issue::NoSeedChooser;
+		state_.status = Status::Playing;
+		return Issue::None;
+	}
+
 	Issue NextLevel() override
 	{
 		if (state_.status != Status::Won)
@@ -217,6 +233,18 @@ int main()
 
 		Command aNext{"c8", 0, {"next_level", "", "", 0, 0}};
 		Check(BridgeCore::Validate(aSnapshot, aNext).issue == Issue::NotPlaying, "validate: next level before win");
+
+		Snapshot aMenu = aSnapshot;
+		aMenu.status = Status::Menu;
+		Command aEnter{"c9", 0, {"enter_adventure", "", "", 0, 0}};
+		Check(BridgeCore::Validate(aMenu, aEnter).issue == Issue::None, "validate: enter adventure from menu");
+		Check(BridgeCore::Validate(aSnapshot, aEnter).issue == Issue::NotPlaying, "validate: enter adventure needs menu");
+
+		Snapshot aIntro = aSnapshot;
+		aIntro.status = Status::Intro;
+		Command aSeeds{"c10", 0, {"choose_seeds", "", "", 0, 0}};
+		Check(BridgeCore::Validate(aIntro, aSeeds).issue == Issue::None, "validate: choose seeds during intro");
+		Check(BridgeCore::Validate(aSnapshot, aSeeds).issue == Issue::NotPlaying, "validate: choose seeds needs intro");
 	}
 
 	// ---- command lifecycle ----------------------------------------------

@@ -49,6 +49,7 @@ public:
 	std::string CommandEnvelope(std::string_view theBody, int& theHttpStatus);
 
 	int Revision() const;
+	std::uint64_t PumpCount() const;
 	bool HasBoard() const;
 	std::size_t QueueDepth() const;
 
@@ -88,8 +89,10 @@ private:
 	std::deque<std::string> receiptOrder_;
 	Snapshot snapshot_;
 	std::string snapshotJson_;
+	std::string diagnosticsJson_ = "{}";
 	bool hasSnapshot_ = false;
 	int revision_ = 0;
 	std::uint64_t nextSeq_ = 1;
+	std::uint64_t pumpCount_ = 0;
 };
 }

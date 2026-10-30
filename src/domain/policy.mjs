@@ -1,7 +1,18 @@
 import {ACTION, ISSUE, STATUS, validateAction} from "./contract.mjs"
 
-/** Plants the controller may place, cheapest-first for prompt brevity. */
-export const PLANT_TYPES = Object.freeze(["sunflower", "peashooter", "wallnut", "snowpea"])
+/** Preferred order; the engine decides what is actually available. */
+export const PLANT_TYPES = Object.freeze([
+  "sunflower", "peashooter", "snowpea", "wallnut", "repeater", "chomper",
+  "cherrybomb", "potatomine", "jalapeno", "squash"
+])
+
+/** Card types the engine offers this level, preferred first. */
+export function plantOrder(snapshot) {
+  const available = snapshot.cards.map((card) => card.type)
+  const preferred = PLANT_TYPES.filter((type) => available.includes(type))
+  const extra = available.filter((type) => !PLANT_TYPES.includes(type))
+  return [...preferred, ...extra]
+}
 
 /** Rows under pressure, nearest zombie first. */
 export function threatRows(snapshot) {
@@ -42,6 +53,8 @@ function placementColumns(snapshot, plant, closestX) {
 export function scoreAction(snapshot, action) {
   const pressure = threatRows(snapshot)
   switch (action.type) {
+    case ACTION.ENTER_ADVENTURE:
+    case ACTION.CHOOSE_SEEDS:
     case ACTION.NEXT_LEVEL:
       return 1000
     case ACTION.COLLECT_SUN: {
@@ -75,7 +88,8 @@ export function scoreAction(snapshot, action) {
           return 380 + safe + Math.max(0, 5 - sunflowers) * 70 - snapshot.sun / 20 - inRow * 120
         }
         default:
-          return 200
+          // Any other seed the engine offers is treated as a usable attacker.
+          return 330 + closer * 4 - (front ? 20 : 0)
       }
     }
     default:
@@ -88,6 +102,14 @@ export function scoreAction(snapshot, action) {
  * small on purpose: a model only ever picks an index from this array.
  */
 export function candidates(snapshot, challenge = {}) {
+  if (snapshot.status === STATUS.MENU) {
+    const action = {type: ACTION.ENTER_ADVENTURE, gameId: snapshot.gameId, revision: snapshot.revision}
+    return validateAction(snapshot, action) ? [] : [action]
+  }
+  if (snapshot.status === STATUS.INTRO) {
+    const action = {type: ACTION.CHOOSE_SEEDS, gameId: snapshot.gameId, revision: snapshot.revision}
+    return validateAction(snapshot, action) ? [] : [action]
+  }
   if (snapshot.status === STATUS.WON) {
     if (!snapshot.hasNextLevel) return []
     const action = {type: ACTION.NEXT_LEVEL, gameId: snapshot.gameId, revision: snapshot.revision}
@@ -113,9 +135,11 @@ export function candidates(snapshot, challenge = {}) {
   const rows = [...threat.map((t) => t.row)]
   for (let row = 1; row <= snapshot.rows; row += 1) if (!rows.includes(row)) rows.push(row)
 
+  const order = plantOrder(snapshot)
+  const shooters = order.filter((type) => type !== "sunflower" && type !== "wallnut")
   const rowPlan = (row, hasThreat) => (hasThreat
-    ? ["peashooter", "wallnut", "snowpea", "sunflower"]
-    : ["sunflower", "peashooter"])
+    ? [shooters[0], "wallnut", ...shooters.slice(1), "sunflower"].filter(Boolean)
+    : ["sunflower", ...shooters.slice(0, 2)])
 
   for (const row of rows) {
     const rowThreat = threat.find((t) => t.row === row)

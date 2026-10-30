@@ -23,5 +23,17 @@ public:
 	virtual Issue CollectSun(const Action& theAction) = 0;
 	virtual Issue Shovel(const Action& theAction) = 0;
 	virtual Issue NextLevel() = 0;
+
+	/** Leave the title screen and start the adventure flow (menu -> intro). */
+	virtual Issue EnterAdventure() = 0;
+
+	/** Fill the seed bank from whatever the level offers and close the chooser. */
+	virtual Issue ChooseSeeds() = 0;
+
+	/**
+	 * Optional JSON with engine-internal counters for debugging a stuck board.
+	 * Captured on the game thread only; never contains player-visible secrets.
+	 */
+	virtual std::string DiagnosticsJson() { return "{}"; }
 };
 }

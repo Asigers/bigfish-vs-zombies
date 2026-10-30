@@ -97,6 +97,57 @@ test("sun collection never starves planting", async () => {
   assert.ok(plants > 10, `planting must continue while sun is collected (${plants})`)
 })
 
+test("an action rejected by the engine is not retried at the same revision", async () => {
+  const clock = {ms: 0, now() { return this.ms }}
+  // A full lawn leaves exactly one legal cell, so a rejection can only be
+  // retried by resending the identical action.
+  const plants = []
+  for (let row = 1; row <= 5; row += 1) {
+    for (let col = 1; col <= 9; col += 1) {
+      if (row === 2 && col === 6) continue
+      plants.push({type: "sunflower", row, col})
+    }
+  }
+  const base = {
+    gameId: "g-reject", level: 2, wave: 0, totalWaves: 3, sun: 500,
+    rows: 5, columns: 9, status: "playing", plants,
+    zombies: [{type: "normal", row: 2, x: 8, health: 200}], suns: [],
+    cards: [{type: "peashooter", cost: 100, ready: true}], blocked: []
+  }
+  let revision = 10
+  const calls = []
+  const game = {
+    async snapshot() { return normalizeSnapshot({...base, revision}) },
+    async command(command) {
+      calls.push(command.action)
+      return {commandId: command.commandId, status: "rejected", issue: "blocked", revisionBefore: revision, revisionAfter: revision}
+    }
+  }
+  const executor = new ActionExecutor({game, now: () => clock.ms, newId: () => `c${calls.length + 1}`})
+  const orchestrator = new Orchestrator({
+    game,
+    agent: new HeuristicAgent(),
+    executor,
+    clock,
+    logger: {info() {}, warn() {}, error() {}, debug() {}},
+    config: {targetLevels: 10}
+  })
+
+  for (let i = 0; i < 12; i += 1) {
+    clock.ms += 250
+    await orchestrator.step()
+  }
+  assert.equal(calls.length, 1, "the same rejected action must not be resent")
+  assert.deepEqual([calls[0].row, calls[0].col], [2, 6])
+  assert.equal(orchestrator.stats.rejected, 1)
+
+  // Once the world moves, the same intent becomes legal again.
+  revision = 11
+  clock.ms += 250
+  await orchestrator.step()
+  assert.equal(calls.length, 2, "a new revision may retry the intent")
+})
+
 test("a lost engine state stops the controller cleanly", async () => {
   const clock = {ms: 0, now() { return this.ms }}
   const playing = {

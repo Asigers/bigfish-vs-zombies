@@ -116,13 +116,25 @@ The Pi sessions have no tools and use only the projected snapshot. If the model
 fails or times out, the loop keeps playing with the deterministic strategy rules
 plus emergency defence; it never blocks the game.
 
+### What the controller handles by itself (verified live)
+
+- Title screen → `enter_adventure`: creates a `BigFish` profile if none exists,
+  marks it as a returning player (skips the scripted tutorial that freezes waves),
+  and builds the board.
+- Seed chooser → `choose_seeds`: clicks Crazy Dave's dialog to completion, fills the
+  bank deterministically (sunflower, peashooter, wallnut, snowpea, repeater, …) and
+  closes the chooser.
+- Level win → `next_level`: advances the profile and starts the next board, which
+  loops back into the seed chooser.
+
 ### Known gaps in a real run
 
-- **Seed chooser:** PvZ asks for seeds before each level; the bridge does not dismiss
-  it yet. Select seeds manually, or wait for the seed-selection increment.
-- `next_level` has not been executed in a real game; watch the first transition.
-- Sun lifetime is not projected; collection is slightly less efficient than it could
-  be.
+- Only adventure day levels are exercised; pool/roof/night, conveyor and mini-game
+  levels are untested.
+- Shovel is implemented and unit-tested but has not been used in a live level.
+- Engine save/restart (`Board::SaveGame`/`LoadGame`) is not covered; a stale
+  mid-level auto-save is deliberately ignored at bootstrap.
+- Sun lifetime assumes ~10 ms engine ticks; it matches observed behaviour (~7.5 s).
 
 ## 4. Troubleshooting
 

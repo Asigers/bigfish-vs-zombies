@@ -9,6 +9,8 @@ export const SCHEMA_VERSION = 1
 
 export const STATUS = Object.freeze({
   PLAYING: "playing",
+  /** Level intro / seed chooser: board exists, level not live yet. */
+  INTRO: "intro",
   WON: "won",
   LOST: "lost",
   PAUSED: "paused",
@@ -19,7 +21,11 @@ export const ACTION = Object.freeze({
   PLANT: "plant",
   COLLECT_SUN: "collect_sun",
   SHOVEL: "shovel",
-  NEXT_LEVEL: "next_level"
+  NEXT_LEVEL: "next_level",
+  /** Bootstrap: leave the title screen and enter the adventure flow. */
+  ENTER_ADVENTURE: "enter_adventure",
+  /** Bootstrap: fill the seed bank and start the level. */
+  CHOOSE_SEEDS: "choose_seeds"
 })
 
 export const ISSUE = Object.freeze({
@@ -38,6 +44,7 @@ export const ISSUE = Object.freeze({
   INSUFFICIENT_SUN: "insufficient_sun",
   SUN_MISSING: "sun_missing",
   NO_NEXT_LEVEL: "no_next_level",
+  NO_SEED_CHOOSER: "no_seed_chooser",
   DUPLICATE_COMMAND: "duplicate_command"
 })
 
@@ -220,6 +227,12 @@ export function validateAction(snapshot, action, challenge = {}) {
   if (!snapshot || action.gameId !== snapshot.gameId || action.revision !== snapshot.revision) {
     return ISSUE.STALE_STATE
   }
+  if (action.type === ACTION.ENTER_ADVENTURE) {
+    return snapshot.status === STATUS.MENU ? null : ISSUE.NOT_PLAYING
+  }
+  if (action.type === ACTION.CHOOSE_SEEDS) {
+    return snapshot.status === STATUS.INTRO ? null : ISSUE.NOT_PLAYING
+  }
   if (action.type === ACTION.NEXT_LEVEL) {
     if (snapshot.status !== STATUS.WON) return ISSUE.NOT_PLAYING
     if (!snapshot.hasNextLevel) return ISSUE.NO_NEXT_LEVEL
@@ -296,7 +309,7 @@ export function buildCommand(snapshot, action, {newId}) {
   return {commandId, expectedRevision: snapshot.revision, action}
 }
 
-const RECEIPT_STATUS = new Set(["applied", "rejected", "duplicate"])
+const RECEIPT_STATUS = new Set(["applied", "accepted", "rejected", "duplicate"])
 
 export function normalizeReceipt(raw, expectedCommandId) {
   if (!raw || typeof raw !== "object") fail("receipt", "expected object")
@@ -311,6 +324,9 @@ export function normalizeReceipt(raw, expectedCommandId) {
   if (revisionAfter < revisionBefore) fail("receipt.revisionAfter", "revision regressed")
   if (status === "applied" && revisionAfter === revisionBefore) {
     fail("receipt.revisionAfter", "an applied command must advance the revision")
+  }
+  if (status === "accepted" && revisionAfter !== revisionBefore) {
+    fail("receipt.revisionAfter", "an accepted command must not claim a revision change")
   }
   return Object.freeze({
     commandId,

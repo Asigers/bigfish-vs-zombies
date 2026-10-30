@@ -63,6 +63,21 @@ test("actions are validated against the observed state", () => {
   assert.equal(validateAction(snapshot({status: STATUS.WON}), plant), ISSUE.NOT_PLAYING)
 })
 
+test("menu and seed-chooser have exactly one legal bootstrap action", () => {
+  const menu = snapshot({status: STATUS.MENU})
+  assert.deepEqual(candidates(menu).map((a) => a.type), [ACTION.ENTER_ADVENTURE])
+  assert.equal(validateAction(menu, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+  assert.equal(validateAction(menu, {type: ACTION.NEXT_LEVEL, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+
+  const intro = snapshot({status: STATUS.INTRO})
+  assert.deepEqual(candidates(intro).map((a) => a.type), [ACTION.CHOOSE_SEEDS])
+  assert.equal(validateAction(intro, {type: ACTION.ENTER_ADVENTURE, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+
+  const playing = snapshot()
+  assert.equal(validateAction(playing, {type: ACTION.ENTER_ADVENTURE, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+  assert.equal(validateAction(playing, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+})
+
 test("next_level is only legal after a win", () => {
   const won = snapshot({status: STATUS.WON, hasNextLevel: true})
   assert.equal(validateAction(won, {type: ACTION.NEXT_LEVEL, gameId: "g1", revision: 1}), null)
@@ -113,6 +128,13 @@ test("receipts are checked for identity and monotonic revisions", () => {
   }, "c1"), ProtocolError)
   assert.throws(() => normalizeReceipt({
     commandId: "c1", status: "applied", revisionBefore: 4, revisionAfter: 4
+  }, "c1"), ContractError)
+  const accepted = normalizeReceipt({
+    commandId: "c1", status: "accepted", revisionBefore: 4, revisionAfter: 4
+  }, "c1")
+  assert.equal(accepted.status, "accepted")
+  assert.throws(() => normalizeReceipt({
+    commandId: "c1", status: "accepted", revisionBefore: 4, revisionAfter: 5
   }, "c1"), ContractError)
   assert.throws(() => normalizeReceipt({
     commandId: "c1", status: "maybe", revisionBefore: 4, revisionAfter: 4

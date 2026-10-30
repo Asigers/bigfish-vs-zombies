@@ -19,6 +19,8 @@ constexpr int kCommandWaitMs = 2500;
 enum class Status
 {
 	Menu,
+	/** Level intro / seed chooser: the board exists but the level is not live. */
+	Intro,
 	Playing,
 	Won,
 	Lost,
@@ -45,6 +47,7 @@ enum class Issue
 	InsufficientSun,
 	SunMissing,
 	NoNextLevel,
+	NoSeedChooser,
 	NoEffect,
 	DuplicateCommand
 };

@@ -16,6 +16,8 @@ const char* const kActionPlant = "plant";
 const char* const kActionCollectSun = "collect_sun";
 const char* const kActionShovel = "shovel";
 const char* const kActionNextLevel = "next_level";
+const char* const kActionEnterAdventure = "enter_adventure";
+const char* const kActionChooseSeeds = "choose_seeds";
 
 std::string SerializeSnapshot(const Snapshot& theSnapshot)
 {
@@ -100,7 +102,8 @@ std::string ReceiptEnvelope(const Receipt& theReceipt)
 bool ValidType(const std::string& theType)
 {
 	return theType == kActionPlant || theType == kActionCollectSun ||
-		theType == kActionShovel || theType == kActionNextLevel;
+		theType == kActionShovel || theType == kActionNextLevel ||
+		theType == kActionEnterAdventure || theType == kActionChooseSeeds;
 }
 
 int RoundToInt(double theValue)
@@ -113,6 +116,7 @@ const char* StatusName(Status theStatus)
 {
 	switch (theStatus)
 	{
+	case Status::Intro: return "intro";
 	case Status::Playing: return "playing";
 	case Status::Won: return "won";
 	case Status::Lost: return "lost";
@@ -141,6 +145,7 @@ const char* IssueName(Issue theIssue)
 	case Issue::InsufficientSun: return "insufficient_sun";
 	case Issue::SunMissing: return "sun_missing";
 	case Issue::NoNextLevel: return "no_next_level";
+	case Issue::NoSeedChooser: return "no_seed_chooser";
 	case Issue::NoEffect: return "no_effect";
 	case Issue::DuplicateCommand: return "duplicate_command";
 	}
@@ -219,6 +224,28 @@ Receipt BridgeCore::Validate(const Snapshot& theSnapshot, const Command& theComm
 	if (theCommand.expectedRevision > theSnapshot.revision)
 	{
 		aReceipt.issue = Issue::FutureState;
+		return aReceipt;
+	}
+	if (aAction.type == kActionEnterAdventure)
+	{
+		if (theSnapshot.status != Status::Menu)
+		{
+			aReceipt.issue = Issue::NotPlaying;
+			return aReceipt;
+		}
+		aReceipt.issue = Issue::None;
+		aReceipt.status = "applied";
+		return aReceipt;
+	}
+	if (aAction.type == kActionChooseSeeds)
+	{
+		if (theSnapshot.status != Status::Intro)
+		{
+			aReceipt.issue = Issue::NotPlaying;
+			return aReceipt;
+		}
+		aReceipt.issue = Issue::None;
+		aReceipt.status = "applied";
 		return aReceipt;
 	}
 	if (aAction.type == kActionNextLevel)
@@ -333,6 +360,10 @@ Receipt BridgeCore::Execute(const Snapshot& theSnapshot, const Command& theComma
 		aIssue = facade_.Shovel(aAction);
 	else if (aAction.type == kActionNextLevel)
 		aIssue = facade_.NextLevel();
+	else if (aAction.type == kActionEnterAdventure)
+		aIssue = facade_.EnterAdventure();
+	else if (aAction.type == kActionChooseSeeds)
+		aIssue = facade_.ChooseSeeds();
 
 	aReceipt.revisionBefore = theSnapshot.revision;
 	aReceipt.revisionAfter = theSnapshot.revision;
@@ -362,7 +393,12 @@ void BridgeCore::Commit(Snapshot theFresh, bool theForceBump)
 
 void BridgeCore::Pump()
 {
+	{
+		std::lock_guard<std::mutex> aLock(mutex_);
+		++pumpCount_;
+	}
 	Snapshot aBefore = facade_.Capture();
+	const std::string aDiagnostics = facade_.DiagnosticsJson();
 
 	Queued aItem;
 	bool aHasItem = false;
@@ -383,8 +419,17 @@ void BridgeCore::Pump()
 	if (!aHasItem)
 	{
 		Commit(std::move(aBefore), false);
+		std::lock_guard<std::mutex> aLock(mutex_);
+		diagnosticsJson_ = aDiagnostics;
 		return;
 	}
+
+	const std::string& aType = aItem.command.action.type;
+	// Transitions (menu -> intro -> playing -> next level) complete over several
+	// frames, so "accepted" is the honest answer when nothing is visible yet.
+	// Every other action must change the projection immediately to count.
+	const bool aTransition = aType == kActionEnterAdventure || aType == kActionChooseSeeds ||
+		aType == kActionNextLevel;
 
 	Receipt aReceipt = Execute(aBefore, aItem.command);
 	Snapshot aAfter = aReceipt.status == "applied" ? facade_.Capture() : aBefore;
@@ -393,8 +438,13 @@ void BridgeCore::Pump()
 
 	if (aReceipt.status == "applied" && !aObservable)
 	{
-		aReceipt.status = "rejected";
-		aReceipt.issue = Issue::NoEffect;
+		if (aTransition)
+			aReceipt.status = "accepted";
+		else
+		{
+			aReceipt.status = "rejected";
+			aReceipt.issue = Issue::NoEffect;
+		}
 	}
 
 	int aRevision = 0;
@@ -410,6 +460,7 @@ void BridgeCore::Pump()
 	{
 		std::lock_guard<std::mutex> aLock(mutex_);
 		Remember(aReceipt);
+		diagnosticsJson_ = aDiagnostics;
 	}
 	Respond(aItem.seq, ReceiptEnvelope(aReceipt));
 }
@@ -574,12 +625,20 @@ std::string BridgeCore::HealthJson() const
 		 << ",\"session\":\"" << JsonEscape(sessionId_) << "\""
 		 << ",\"ready\":" << (hasSnapshot_ ? "true" : "false")
 		 << ",\"revision\":" << revision_
+		 << ",\"pumps\":" << pumpCount_
+		 << ",\"diag\":" << diagnosticsJson_
 		 << ",\"level\":" << snapshot_.level
 		 << ",\"status\":\"" << StatusName(snapshot_.status) << "\""
 		 << ",\"uptimeMs\":" << (std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::steady_clock::now().time_since_epoch()).count() - startedAtMs_)
 		 << '}';
 	return aOut.str();
+}
+
+std::uint64_t BridgeCore::PumpCount() const
+{
+	std::lock_guard<std::mutex> aLock(mutex_);
+	return pumpCount_;
 }
 
 int BridgeCore::Revision() const

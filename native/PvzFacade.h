@@ -18,6 +18,9 @@ public:
 	Issue CollectSun(const Action& theAction) override;
 	Issue Shovel(const Action& theAction) override;
 	Issue NextLevel() override;
+	Issue EnterAdventure() override;
+	Issue ChooseSeeds() override;
+	std::string DiagnosticsJson() override;
 
 private:
 	LawnApp* app_;

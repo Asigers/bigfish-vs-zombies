@@ -9,3 +9,4 @@ properties/
 *.pak
 *.dmo
 user*.dat
+.DS_Store

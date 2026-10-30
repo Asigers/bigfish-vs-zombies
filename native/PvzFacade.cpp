@@ -2,13 +2,18 @@
 #include "PvzFacade.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
+#include <vector>
 
 #include "LawnApp.h"
 #include "Lawn/Board.h"
 #include "Lawn/Coin.h"
+#include "Lawn/Cutscene.h"
 #include "Lawn/Plant.h"
 #include "Lawn/SeedPacket.h"
+#include "Lawn/System/ProfileMgr.h"
+#include "Lawn/Widget/SeedChooserScreen.h"
 #include "Lawn/Zombie.h"
 
 namespace bigfish
@@ -58,6 +63,17 @@ std::string ZombieName(ZombieType theType)
 	case ZombieType::ZOMBIE_GARGANTUAR: return "gargantuar";
 	default: return "other";
 	}
+}
+
+/** PvZ works in board pixels; the wire contract uses 1-based cells. */
+float CellX(float thePixelX)
+{
+	return (thePixelX - static_cast<float>(LAWN_XMIN)) / 80.0f;
+}
+
+float CellY(float thePixelY)
+{
+	return (thePixelY - static_cast<float>(LAWN_YMIN)) / 85.0f;
 }
 
 std::string SunId(Board* theBoard, Coin* theCoin)
@@ -112,6 +128,8 @@ Snapshot PvzFacade::Capture()
 		aSnapshot.status = Status::Paused;
 	else if (app_->mGameScene == GameScenes::SCENE_PLAYING)
 		aSnapshot.status = Status::Playing;
+	else if (app_->mSeedChooserScreen != nullptr || app_->mGameScene == GameScenes::SCENE_LEVEL_INTRO)
+		aSnapshot.status = Status::Intro;
 	else
 		aSnapshot.status = Status::Menu;
 
@@ -137,7 +155,7 @@ Snapshot PvzFacade::Capture()
 		aSnapshot.zombies.push_back(ZombieView{
 			ZombieName(aZombie->mZombieType),
 			aZombie->mRow + 1,
-			aZombie->mPosX,
+			CellX(aZombie->mPosX),
 			std::max(0, aZombie->mBodyHealth) + std::max(0, aZombie->mHelmHealth)
 		});
 	}
@@ -163,11 +181,14 @@ Snapshot PvzFacade::Capture()
 	{
 		if (aCoin == nullptr || aCoin->mDead || aCoin->mIsBeingCollected || !aCoin->IsSun())
 			continue;
+		// Suns age in engine ticks (~10 ms); report the remaining life so the
+		// controller can tell an urgent sun from a fresh one.
+		const int aRemainingTicks = std::max(0, aCoin->GetDisappearTime() - aCoin->mDisappearCounter);
 		aSnapshot.suns.push_back(SunView{
 			SunId(aBoard, aCoin),
-			aCoin->mPosX,
-			aCoin->mPosY,
-			0 // remaining lifetime is engine-internal; the policy treats it as unknown
+			CellX(aCoin->mPosX),
+			CellY(aCoin->mPosY),
+			aRemainingTicks * 10
 		});
 	}
 
@@ -207,6 +228,9 @@ Issue PvzFacade::PlacePlant(const Action& theAction)
 	Plant* aNewPlant = aBoard->AddPlant(aCol, aRow, aSeed);
 	if (aNewPlant == nullptr)
 		return Issue::Blocked;
+	// Mirror picking the packet up (Deactivate) and placing it (WasPlanted):
+	// the refresh counter only advances while the packet is inactive.
+	aPacket->Deactivate();
 	aPacket->WasPlanted();
 	return Issue::None;
 }
@@ -263,8 +287,181 @@ Issue PvzFacade::NextLevel()
 	// Same bookkeeping the award screen performs: advance the profile, then let
 	// the engine build the next board. A seed chooser appears; the controller
 	// must not send plant commands until it is dismissed.
+	app_->KillAwardScreen();
 	app_->UpdatePlayerProfileForFinishingLevel();
 	app_->NewGame();
+	return Issue::None;
+}
+
+std::string PvzFacade::DiagnosticsJson()
+{
+	if (app_ == nullptr)
+		return "{}";
+	Board* aBoard = app_->mBoard;
+	std::string aOut = std::format(
+		"{{\"scene\":{},\"active\":{},\"minimized\":{},\"paused\":{}",
+		static_cast<int>(app_->mGameScene),
+		app_->mActive ? "true" : "false",
+		app_->mMinimized ? "true" : "false",
+		(aBoard != nullptr && aBoard->mPaused) ? "true" : "false");
+	if (aBoard != nullptr)
+	{
+		aOut += std::format(
+			",\"tutorial\":{},\"seedChoosing\":{},\"boardUpdates\":{},\"sunCountdown\":{}"
+			",\"zombieCountdown\":{},\"wave\":{},\"totalWaves\":{},\"packets\":{},"
+			"\"cutsceneTime\":{},\"preUpdating\":{},\"crazyDaveMsg\":{},\"chooseSeeds\":{}",
+			static_cast<int>(aBoard->mTutorialState),
+			(aBoard->mCutScene != nullptr && aBoard->mCutScene->mSeedChoosing) ? "true" : "false",
+			aBoard->mBoardUpdateCounter,
+			aBoard->mSunCountDown,
+			aBoard->mZombieCountDown,
+			aBoard->mCurrentWave,
+			aBoard->mNumWaves,
+			(aBoard->mSeedBank != nullptr) ? aBoard->mSeedBank->mNumPackets : -1,
+			(aBoard->mCutScene != nullptr) ? aBoard->mCutScene->mCutsceneTime : -1,
+			(aBoard->mCutScene != nullptr && aBoard->mCutScene->mPreUpdatingBoard) ? "true" : "false",
+			app_->mCrazyDaveMessageIndex,
+			aBoard->ChooseSeedsOnCurrentLevel() ? "true" : "false");
+	}
+	aOut += "}";
+	return aOut;
+}
+
+Issue PvzFacade::EnterAdventure()
+{
+	if (app_ == nullptr)
+		return Issue::NotPlaying;
+	if (app_->mBoard != nullptr || app_->mSeedChooserScreen != nullptr)
+		return Issue::NotPlaying;
+
+	// The engine dereferences mPlayerInfo when building a board. A fresh install
+	// has no profile yet (the UI would show the New User dialog), so create the
+	// default one here, exactly like FinishCreateUserDialog does.
+	if (!app_->mProfileMgr)
+		return Issue::NotPlaying;
+	PlayerInfo* aProfile = app_->mPlayerInfo;
+	if (aProfile == nullptr)
+	{
+		aProfile = app_->mProfileMgr->GetAnyProfile();
+		if (aProfile == nullptr)
+			aProfile = app_->mProfileMgr->AddProfile("BigFish");
+		if (aProfile == nullptr)
+			return Issue::NotPlaying;
+	}
+	// A bot profile skips the first-time tutorial: it cannot answer the scripted
+	// "pick up the peashooter" steps, and the tutorial freezes sun and wave
+	// spawning until they are done. Difficulty is unchanged.
+	if (aProfile->mFinishedAdventure == 0)
+	{
+		aProfile->mFinishedAdventure = 1;
+		app_->mProfileMgr->Save();
+	}
+	app_->mPlayerInfo = aProfile;
+
+	// Start the profile's current level; a stale mid-level save is intentionally
+	// not resumed, so a bot session always begins from a known board.
+	app_->PreNewGame(GameMode::GAMEMODE_ADVENTURE, false);
+	return Issue::None;
+}
+
+Issue PvzFacade::ChooseSeeds()
+{
+	if (app_ == nullptr || app_->mSeedChooserScreen == nullptr)
+		return Issue::NoSeedChooser;
+	SeedChooserScreen* aChooser = app_->mSeedChooserScreen.get();
+	Board* aBoard = app_->mBoard;
+	if (aBoard == nullptr || aBoard->mSeedBank == nullptr)
+		return Issue::NoSeedChooser;
+	if (aChooser->mSeedsInFlight > 0)
+		return Issue::NoSeedChooser;
+
+	// Crazy Dave can be holding the intro (he freezes the cutscene clock until
+	// every line has been clicked through). Advance him exactly like a click.
+	int aDaveGuard = 0;
+	while (app_->mCrazyDaveMessageIndex != -1 && aDaveGuard++ < 64)
+	{
+		if (!app_->AdvanceCrazyDaveText())
+			app_->CrazyDaveLeave();
+	}
+
+	const int aSlots = aBoard->mSeedBank->mNumPackets;
+	if (aSlots <= 0 || aSlots > SEEDBANK_MAX)
+		return Issue::NoSeedChooser;
+
+	// Start from a clean chooser: previous attempts may have left packets in the
+	// bank, and CloseSeedChooser maps slots by index.
+	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
+		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
+	{
+		ChosenSeed& aSeed = aChooser->mChosenSeeds[anIndex];
+		if (aSeed.mSeedState == ChosenSeedState::SEED_IN_BANK)
+		{
+			aSeed.mSeedState = ChosenSeedState::SEED_IN_CHOOSER;
+			aSeed.mSeedIndexInBank = -1;
+		}
+	}
+
+	std::vector<SeedType> aAvailable;
+	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
+		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
+	{
+		const SeedType aSeed = static_cast<SeedType>(anIndex);
+		if (aSeed == SeedType::SEED_IMITATER)
+			continue;
+		if (!app_->HasSeedType(aSeed))
+			continue;
+		if (aChooser->SeedNotAllowedToPick(aSeed))
+			continue;
+		if (aChooser->mChosenSeeds[aSeed].mSeedState != ChosenSeedState::SEED_IN_CHOOSER)
+			continue;
+		aAvailable.push_back(aSeed);
+	}
+	if (static_cast<int>(aAvailable.size()) < aSlots)
+		return Issue::NoSeedChooser;
+
+	// Deterministic preference order; the strategy only uses the first four.
+	static const SeedType aPreferred[] = {
+		SeedType::SEED_SUNFLOWER, SeedType::SEED_PEASHOOTER, SeedType::SEED_WALLNUT,
+		SeedType::SEED_SNOWPEA, SeedType::SEED_REPEATER, SeedType::SEED_CHERRYBOMB,
+		SeedType::SEED_POTATOMINE, SeedType::SEED_CHOMPER,
+		SeedType::SEED_LILYPAD, SeedType::SEED_FLOWERPOT
+	};
+	std::vector<SeedType> aChosen;
+	for (const SeedType aWant : aPreferred)
+	{
+		if (std::find(aAvailable.begin(), aAvailable.end(), aWant) != aAvailable.end())
+			aChosen.push_back(aWant);
+	}
+	for (const SeedType aSeed : aAvailable)
+	{
+		if (static_cast<int>(aChosen.size()) >= aSlots)
+			break;
+		if (std::find(aChosen.begin(), aChosen.end(), aSeed) == aChosen.end())
+			aChosen.push_back(aSeed);
+	}
+	aChosen.resize(static_cast<std::size_t>(aSlots));
+
+	for (int anIndex = 0; anIndex < aSlots; ++anIndex)
+	{
+		ChosenSeed& aSeed = aChooser->mChosenSeeds[aChosen[static_cast<std::size_t>(anIndex)]];
+		int aX = 0;
+		int aY = 0;
+		aChooser->GetSeedPositionInBank(anIndex, aX, aY);
+		aSeed.mSeedIndexInBank = anIndex;
+		aSeed.mSeedState = ChosenSeedState::SEED_IN_BANK;
+		aSeed.mX = aX;
+		aSeed.mY = aY;
+		aSeed.mStartX = aX;
+		aSeed.mStartY = aY;
+		aSeed.mEndX = aX;
+		aSeed.mEndY = aY;
+		aSeed.mTimeStartMotion = 0;
+		aSeed.mTimeEndMotion = 0;
+		aSeed.mRefreshing = false;
+		aSeed.mRefreshCounter = 0;
+	}
+	aChooser->mSeedsInBank = aSlots;
+	aChooser->CloseSeedChooser();
 	return Issue::None;
 }
 }

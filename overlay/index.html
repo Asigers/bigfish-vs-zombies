@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>BigFish vs Zombies · Live2D OBS</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+#stage{position:fixed;right:26px;bottom:23px;width:min(500px,36vw);min-width:270px;display:flex;align-items:flex-end;flex-direction:column;pointer-events:none}
+#speech{max-width:92%;background:rgba(13,32,55,.93);border:1px solid rgba(158,212,255,.43);color:#f6fcff;
+  font-size:clamp(16px,1.22vw,23px);line-height:1.52;font-weight:620;border-radius:18px 18px 5px 18px;
+  padding:14px 17px;margin-right:14px;margin-bottom:3px;box-shadow:0 10px 25px #06172860;
+  opacity:0;transform:translateY(10px);transition:opacity .25s,transform .25s;overflow-wrap:anywhere}
+#speech.visible{opacity:1;transform:translateY(0)}
+#identity{align-self:flex-end;margin-right:24px;border-radius:30px;padding:7px 13px;color:#e5faff;
+  border:1px solid rgba(163,213,245,.42);background:rgba(8,32,53,.83);
+  font-size:12px;max-width:88%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#identity::before{content:"";display:inline-block;width:7px;height:7px;background:#70e6af;box-shadow:0 0 8px #70e6af;border-radius:50%;margin-right:8px}
+#avatar{height:min(455px,40vw);width:100%;min-height:260px;position:relative;overflow:hidden;transform-origin:center bottom}
+#live2d-canvas{height:100%;width:100%}
+#missing{position:absolute;bottom:10px;right:6px;max-width:410px;background:rgba(12,31,51,.93);color:#e3f3fa;
+  border:1px solid #7eaecd88;border-radius:13px;padding:15px;font-size:14px;line-height:1.7;pointer-events:auto}
+#missing code{font-size:12px;word-break:break-all;color:#b7e6fc}
+#credits{color:#c6e5fa;background:#12344b98;font-size:10px;border-radius:7px;padding:3px 7px;margin-top:-2px;margin-right:12px;max-width:96%;text-align:right}
+#credits a{color:inherit}
+body[data-mode=preview] #stage{right:26px;bottom:26px}
+@media(max-width:900px){#stage{right:12px;bottom:12px}#avatar{height:340px}#speech{font-size:16px}}
+</style>
+</head>
+<body><div id="stage">
+  <div id="speech" aria-live="polite"></div>
+  <div id="identity">大肥鱼 · 打僵尸中</div>
+  <div id="avatar" data-emotion="idle" data-speaking="false" role="img" aria-label="大肥鱼 Live2D 直播角色">
+    <div id="live2d-canvas"></div>
+    <div id="missing" hidden>
+      <strong>尚未安装 Live2D 模型</strong>
+      <div>在 BigFish 目录执行：</div>
+      <code>npm run overlay:install -- --acknowledge-noncommercial</code>
+      <div>随后重启服务或刷新 OBS 浏览器源。</div>
+    </div>
+  </div>
+  <div id="credits">角色：上善无形 · ZipZipPipe · 氵六青 ｜ <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh">CC BY-NC-SA 4.0</a></div>
+</div>
+<script src="/overlay/live2d.js"></script>
+</body></html>

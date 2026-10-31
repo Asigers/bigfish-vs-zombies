@@ -29,6 +29,7 @@ function parseArgs(argv) {
     seed: 7,
     url: null,
     token: null,
+    overlay: false,
     help: false
   }
   for (const raw of argv.slice(2)) {
@@ -45,6 +46,9 @@ function parseArgs(argv) {
       case "url": args.url = value; break
       case "token": args.token = value; break
       case "seed": args.seed = Number(value); break
+      case "overlay":
+        args.overlay = value === undefined ? 45931 : Number(value)
+        break
       case "quiet": args.quiet = true; break
       case "help": args.help = true; break
       default: break
@@ -65,6 +69,7 @@ function usage() {
     "  --journal=PATH          JSONL audit trail (default .state/journal.jsonl)",
     "  --url=URL --token=T     bridge endpoint (or BIGFISH_BRIDGE_URL/TOKEN)",
     "  --seed=N                simulator seed",
+    "  --overlay[=PORT]        serve the Live2D OBS browser source (default 45931)",
     "  --quiet                 no progress output"
   ].join("\n")
 }
@@ -127,6 +132,15 @@ async function main() {
     agent = new HeuristicAgent()
   }
 
+  const {OverlayServer} = await import("./overlay/server.mjs")
+  const {SpeechThrottle, speechForEvent} = await import("./overlay/speech.mjs")
+  let overlay = null
+  const speech = new SpeechThrottle()
+  if (args.overlay !== false && args.overlay > 0) {
+    overlay = new OverlayServer({root: path.resolve(process.cwd(), "overlay"), port: args.overlay, logger})
+    await overlay.start()
+  }
+
   const executor = new ActionExecutor({game, journal, logger, now: () => clock.now()})
   const orchestrator = new Orchestrator({
     game,
@@ -139,6 +153,10 @@ async function main() {
     config: {targetLevels: args.levels},
     onEvent: (event) => {
       if (event.type === "narration") logger.info(`BigFish: ${event.text}`)
+      if (overlay && speech.accept(event)) {
+        const line = speechForEvent(event, {level: event.level ?? 1})
+        if (line) overlay.publish(line)
+      }
       if (event.type === "level_summary" && !args.quiet) {
         const seconds = (event.durationMs / 1000).toFixed(1)
         logger.info(`level ${event.level} ${event.cleared ? "cleared" : "ended"} in ${seconds}s (${event.commands} commands)`)
@@ -196,6 +214,7 @@ async function main() {
     await loop.stop({drain: true}).catch(() => {})
     await agent.close?.().catch(() => {})
     await game.close?.().catch(() => {})
+    await overlay?.stop().catch(() => {})
     await journal.close()
   }
 

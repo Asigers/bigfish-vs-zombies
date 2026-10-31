@@ -29,10 +29,11 @@ test("snapshots reject out-of-contract engine output", () => {
   assert.throws(() => snapshot({rows: 9}), ContractError)
   assert.throws(() => snapshot({status: "exploded"}), ContractError)
   assert.throws(() => snapshot({zombies: [{type: "normal", row: 1, x: 1}]}), ContractError)
-  assert.throws(() => snapshot({plants: [
+  // Overlapping plants are legal (bowling balls roll, layered plants share cells).
+  assert.equal(snapshot({plants: [
     {type: "sunflower", row: 1, col: 1},
     {type: "wallnut", row: 1, col: 1}
-  ]}), ContractError)
+  ]}).plants.length, 2)
   assert.throws(() => snapshot({revision: -1}), ContractError)
 })
 

@@ -10,3 +10,12 @@ properties/
 *.dmo
 user*.dat
 .DS_Store
+
+# Live2D model + Cubism runtime are installed locally, never committed (CC BY-NC-SA).
+overlay/assets/model/
+overlay/assets/vendor/
+overlay/assets/SOURCE.json
+overlay/.live2d-cache/
+overlay/.live2d-stage-*/
+.playwright-mcp/
+overlay/*.png

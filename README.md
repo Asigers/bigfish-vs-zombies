@@ -17,9 +17,11 @@ levels without human input (levels 1–2 cleared end to end so far). See
 | Native bridge protocol + HTTP server | working | 32 native checks |
 | PvZ-Portable facade (plant/sun/shovel/next level) | compiles against upstream headers | `scripts/native-check.sh` |
 | Simulated 10-level campaign, end to end | passes | `tests/campaign.test.mjs` |
+| Live2D avatar reacts to real game events | verified in browser + live bridge | `docs/LIVE2D.md` |
 | Real-game levels 1–2 (seed choice → win → next level) | cleared unattended | `docs/M0-STATUS.md` |
 | Real game on this Mac | **working**: boots, plays, clears levels | `docs/M0-STATUS.md` |
-| Douyin gateway, OBS/Live2D, TTS | not implemented | `docs/ARCHITECTURE.md` |
+| Live2D character layer (OBS browser source) | working, non-commercial model | `docs/LIVE2D.md` |
+| Douyin gateway, TTS, vote widgets | not implemented | `docs/ARCHITECTURE.md` |
 
 ## Quick start
 
@@ -30,6 +32,10 @@ npm run sim -- --seed=11    # deterministic scenario variant
 
 # Verify the bridge and compile it into PvZ-Portable (needs cmake + ninja + git):
 npm run test:native         # clones upstream at a pinned commit, patches, builds, tests
+
+npm run overlay:install -- --acknowledge-noncommercial   # Live2D model + runtime
+npm run overlay             # preview the character layer (browser/OBS)
+npm run live                # game controller + overlay on 45931
 ```
 
 Run against a real game once assets exist:
@@ -56,6 +62,8 @@ src/
   adapters/      bridge-client (native HTTP), simulated-game, pi-agent, douyin
   agents/        heuristic offline strategy
   main.mjs       entrypoint (sim | bridge, heuristic | pi)
+  overlay/       Live2D OBS surface: static page, SSE server, speech mapping
+overlay/         OBS browser source page + locally installed model (git-ignored)
 native/
   Protocol.h     wire contract, issue codes, snapshot structs
   BridgeCore     revisioning, command queue, idempotency (game-agnostic, unit-tested)

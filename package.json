@@ -12,7 +12,10 @@
     "sim": "node src/main.mjs --engine=sim --levels=10 --tick=250 --quiet",
     "sim:verbose": "node src/main.mjs --engine=sim --levels=10 --tick=250",
     "test:native": "bash scripts/native-check.sh",
-    "check": "npm test && npm run test:native"
+    "check": "npm test && npm run test:native",
+    "live": "node src/main.mjs --engine=bridge --tick=300 --overlay=45931",
+    "overlay": "node src/overlay/preview.mjs",
+    "overlay:install": "node scripts/install-live2d.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0"

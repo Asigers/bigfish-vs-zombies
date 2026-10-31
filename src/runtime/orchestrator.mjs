@@ -141,7 +141,11 @@ export class Orchestrator {
       this.levelStartedAt = this.clock.now()
       this.#emit("engine_changed", {gameId: snapshot.gameId})
     }
-    if (relation !== "same") this.#emit("snapshot", {revision: snapshot.revision, relation})
+    // Only structural changes belong in the audit trail; per-cycle revisions
+    // would flood the journal during animations.
+    if (["level_changed", "status_changed", "engine_changed"].includes(relation)) {
+      this.#emit("snapshot", {revision: snapshot.revision, relation})
+    }
     if (this.rejections.revision !== snapshot.revision) {
       this.rejections = {revision: snapshot.revision, keys: new Set()}
     }

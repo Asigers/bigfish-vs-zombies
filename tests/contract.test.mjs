@@ -146,3 +146,11 @@ test("receipts are checked for identity and monotonic revisions", () => {
     commandId: "c1", status: "maybe", revisionBefore: 4, revisionAfter: 4
   }, "c1"), ContractError)
 })
+
+test("conveyor banks hand out free seeds", () => {
+  const conveyor = snapshot({sun: 0, freeSeeds: true, cards: [{type: "wallnut", cost: 50, ready: true}]})
+  assert.equal(validateAction(conveyor, {type: ACTION.PLANT, plant: "wallnut", row: 1, col: 1, gameId: "g1", revision: 1}), null)
+  assert.ok(candidates(conveyor).some((a) => a.type === ACTION.PLANT))
+  const paid = snapshot({sun: 0, cards: [{type: "wallnut", cost: 50, ready: true}]})
+  assert.equal(validateAction(paid, {type: ACTION.PLANT, plant: "wallnut", row: 1, col: 1, gameId: "g1", revision: 1}), ISSUE.INSUFFICIENT_SUN)
+})

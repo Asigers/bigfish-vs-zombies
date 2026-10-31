@@ -97,6 +97,8 @@ struct Snapshot
 	int columns = kColumns;
 	Status status = Status::Menu;
 	bool hasNextLevel = true;
+	/** Conveyor / mini-game banks hand out free seeds: sun is irrelevant. */
+	bool freeSeeds = false;
 	std::vector<PlantView> plants;
 	std::vector<ZombieView> zombies;
 	std::vector<CardView> cards;

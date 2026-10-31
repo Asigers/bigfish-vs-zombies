@@ -92,6 +92,9 @@ export class ActionExecutor {
       expectedRevision: snapshot.revision,
       level: snapshot.level,
       gameId: snapshot.gameId,
+      // Conveyor banks have no stable post-condition (a bowling wallnut rolls
+      // away), so the engine's `applied` receipt is the confirmation.
+      trustReceipt: snapshot.freeSeeds === true,
       reason,
       sentAt: this.now(),
       receipt: null
@@ -151,6 +154,20 @@ export class ActionExecutor {
       return result
     }
     if (snapshot.revision <= pending.expectedRevision) return null
+
+    if (pending.trustReceipt && pending.receipt?.status === "applied") {
+      this.pending = null
+      this.stats.verified += 1
+      const result = {
+        outcome: OUTCOME.VERIFIED,
+        commandId: pending.commandId,
+        action: pending.action,
+        revision: snapshot.revision,
+        receipt: pending.receipt
+      }
+      this.#log({phase: "verified", ...result})
+      return result
+    }
 
     if (effectVisible(snapshot, pending.action, {level: pending.level})) {
       this.pending = null

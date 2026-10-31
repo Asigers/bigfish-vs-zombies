@@ -33,6 +33,7 @@ std::string SerializeSnapshot(const Snapshot& theSnapshot)
 		 << ",\"columns\":" << theSnapshot.columns
 		 << ",\"status\":\"" << StatusName(theSnapshot.status) << "\""
 		 << ",\"hasNextLevel\":" << (theSnapshot.hasNextLevel ? "true" : "false")
+		 << ",\"freeSeeds\":" << (theSnapshot.freeSeeds ? "true" : "false")
 		 << ",\"blocked\":[]";
 
 	aOut << ",\"plants\":[";
@@ -163,6 +164,7 @@ bool SameState(const Snapshot& theLeft, const Snapshot& theRight)
 		theLeft.columns != theRight.columns ||
 		theLeft.status != theRight.status ||
 		theLeft.hasNextLevel != theRight.hasNextLevel ||
+		theLeft.freeSeeds != theRight.freeSeeds ||
 		theLeft.plants.size() != theRight.plants.size() ||
 		theLeft.zombies.size() != theRight.zombies.size() ||
 		theLeft.cards.size() != theRight.cards.size() ||
@@ -329,7 +331,7 @@ Receipt BridgeCore::Validate(const Snapshot& theSnapshot, const Command& theComm
 		aReceipt.issue = Issue::Cooldown;
 		return aReceipt;
 	}
-	if (aCard->cost > theSnapshot.sun)
+	if (!theSnapshot.freeSeeds && aCard->cost > theSnapshot.sun)
 	{
 		aReceipt.issue = Issue::InsufficientSun;
 		return aReceipt;

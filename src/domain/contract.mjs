@@ -114,12 +114,8 @@ export function normalizeSnapshot(raw) {
     }
   })
 
-  const seenPlants = new Set()
-  for (const plant of plants) {
-    const key = `${plant.row}:${plant.col}`
-    if (seenPlants.has(key)) fail("snapshot.plants", `two plants share cell ${key}`)
-    seenPlants.add(key)
-  }
+  // Overlapping plants are legal: wall-nut bowling balls roll across cells and
+  // layered plants share a cell in other modes. Occupancy checks use `some()`.
 
   const zombies = array(raw.zombies ?? [], "snapshot.zombies", MAX_ZOMBIES).map((zombie, i) => {
     const at = `snapshot.zombies[${i}]`
@@ -173,6 +169,8 @@ export function normalizeSnapshot(raw) {
     columns,
     status,
     hasNextLevel: raw.hasNextLevel === undefined ? true : bool(raw.hasNextLevel, "snapshot.hasNextLevel"),
+    /** Conveyor banks give free seeds; the sun check does not apply. */
+    freeSeeds: raw.freeSeeds === undefined ? false : bool(raw.freeSeeds, "snapshot.freeSeeds"),
     plants: freezeAll(plants),
     zombies: freezeAll(zombies),
     cards: freezeAll(cards),
@@ -265,7 +263,7 @@ export function validateAction(snapshot, action, challenge = {}) {
   const card = snapshot.cards.find((c) => c.type === action.plant)
   if (!card) return ISSUE.MISSING_CARD
   if (!card.ready) return ISSUE.COOLDOWN
-  if (card.cost > snapshot.sun) return ISSUE.INSUFFICIENT_SUN
+  if (!snapshot.freeSeeds && card.cost > snapshot.sun) return ISSUE.INSUFFICIENT_SUN
   return null
 }
 

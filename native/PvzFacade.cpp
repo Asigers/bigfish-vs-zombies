@@ -135,6 +135,7 @@ Snapshot PvzFacade::Capture()
 
 	const bool aAdventure = app_->IsAdventureMode();
 	aSnapshot.hasNextLevel = aAdventure ? aSnapshot.level < FINAL_LEVEL : true;
+	aSnapshot.freeSeeds = aBoard->HasConveyorBeltSeedBank();
 
 	for (Plant* aPlant : aBoard->mPlants)
 	{
@@ -213,8 +214,10 @@ Issue PvzFacade::PlacePlant(const Action& theAction)
 	if (aBoard->CanPlantAt(aCol, aRow, aSeed) != PlantingReason::PLANTING_OK)
 		return Issue::Blocked;
 
-	const int aCost = Plant::GetCost(aSeed);
-	if (!aBoard->CanTakeSunMoney(aCost))
+	// Conveyor / mini-game banks hand out free seeds; no sun is involved.
+	const bool aFreeSeed = aBoard->HasConveyorBeltSeedBank();
+	const int aCost = aFreeSeed ? 0 : Plant::GetCost(aSeed);
+	if (!aFreeSeed && !aBoard->CanTakeSunMoney(aCost))
 		return Issue::InsufficientSun;
 
 	SeedPacket* aPacket = PacketFor(aBoard, aSeed);
@@ -223,15 +226,23 @@ Issue PvzFacade::PlacePlant(const Action& theAction)
 	if (aPacket->mRefreshing || aPacket->mRefreshCounter > 0)
 		return Issue::Cooldown;
 
-	if (!aBoard->TakeSunMoney(aCost))
+	if (!aFreeSeed && !aBoard->TakeSunMoney(aCost))
 		return Issue::InsufficientSun;
 	Plant* aNewPlant = aBoard->AddPlant(aCol, aRow, aSeed);
 	if (aNewPlant == nullptr)
 		return Issue::Blocked;
-	// Mirror picking the packet up (Deactivate) and placing it (WasPlanted):
-	// the refresh counter only advances while the packet is inactive.
-	aPacket->Deactivate();
-	aPacket->WasPlanted();
+	if (aBoard->HasConveyorBeltSeedBank())
+	{
+		// Conveyor seeds are consumed (RemoveSeed), not refreshed.
+		aPacket->WasPlanted();
+	}
+	else
+	{
+		// Mirror picking the packet up (Deactivate) and placing it (WasPlanted):
+		// the refresh counter only advances while the packet is inactive.
+		aPacket->Deactivate();
+		aPacket->WasPlanted();
+	}
 	return Issue::None;
 }
 
@@ -309,7 +320,8 @@ std::string PvzFacade::DiagnosticsJson()
 		aOut += std::format(
 			",\"tutorial\":{},\"seedChoosing\":{},\"boardUpdates\":{},\"sunCountdown\":{}"
 			",\"zombieCountdown\":{},\"wave\":{},\"totalWaves\":{},\"packets\":{},"
-			"\"cutsceneTime\":{},\"preUpdating\":{},\"crazyDaveMsg\":{},\"chooseSeeds\":{}",
+			"\"cutsceneTime\":{},\"preUpdating\":{},\"crazyDaveMsg\":{},\"chooseSeeds\":{},"
+			"\"gameMode\":{},\"boardLevel\":{},\"finishedAdventure\":{},\"firstTime\":{}",
 			static_cast<int>(aBoard->mTutorialState),
 			(aBoard->mCutScene != nullptr && aBoard->mCutScene->mSeedChoosing) ? "true" : "false",
 			aBoard->mBoardUpdateCounter,
@@ -321,7 +333,11 @@ std::string PvzFacade::DiagnosticsJson()
 			(aBoard->mCutScene != nullptr) ? aBoard->mCutScene->mCutsceneTime : -1,
 			(aBoard->mCutScene != nullptr && aBoard->mCutScene->mPreUpdatingBoard) ? "true" : "false",
 			app_->mCrazyDaveMessageIndex,
-			aBoard->ChooseSeedsOnCurrentLevel() ? "true" : "false");
+			aBoard->ChooseSeedsOnCurrentLevel() ? "true" : "false",
+			static_cast<int>(app_->mGameMode),
+			aBoard->mLevel,
+			(app_->mPlayerInfo != nullptr) ? app_->mPlayerInfo->mFinishedAdventure : -1,
+			app_->IsFirstTimeAdventureMode() ? "true" : "false");
 	}
 	aOut += "}";
 	return aOut;
@@ -366,23 +382,29 @@ Issue PvzFacade::EnterAdventure()
 
 Issue PvzFacade::ChooseSeeds()
 {
-	if (app_ == nullptr || app_->mSeedChooserScreen == nullptr)
-		return Issue::NoSeedChooser;
-	SeedChooserScreen* aChooser = app_->mSeedChooserScreen.get();
-	Board* aBoard = app_->mBoard;
-	if (aBoard == nullptr || aBoard->mSeedBank == nullptr)
-		return Issue::NoSeedChooser;
-	if (aChooser->mSeedsInFlight > 0)
+	if (app_ == nullptr)
 		return Issue::NoSeedChooser;
 
 	// Crazy Dave can be holding the intro (he freezes the cutscene clock until
-	// every line has been clicked through). Advance him exactly like a click.
+	// every line has been clicked through). Advance him exactly like a click,
+	// even on levels that do not offer a seed chooser.
 	int aDaveGuard = 0;
 	while (app_->mCrazyDaveMessageIndex != -1 && aDaveGuard++ < 64)
 	{
 		if (!app_->AdvanceCrazyDaveText())
 			app_->CrazyDaveLeave();
 	}
+
+	// Conveyor-belt and mini-game levels have no chooser: dismissing Dave above
+	// is the whole job, the cutscene then starts the level by itself.
+	if (app_->mSeedChooserScreen == nullptr)
+		return Issue::None;
+	SeedChooserScreen* aChooser = app_->mSeedChooserScreen.get();
+	Board* aBoard = app_->mBoard;
+	if (aBoard == nullptr || aBoard->mSeedBank == nullptr)
+		return Issue::NoSeedChooser;
+	if (aChooser->mSeedsInFlight > 0)
+		return Issue::NoSeedChooser;
 
 	const int aSlots = aBoard->mSeedBank->mNumPackets;
 	if (aSlots <= 0 || aSlots > SEEDBANK_MAX)

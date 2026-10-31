@@ -234,6 +234,11 @@ int main()
 		Command aNext{"c8", 0, {"next_level", "", "", 0, 0}};
 		Check(BridgeCore::Validate(aSnapshot, aNext).issue == Issue::NotPlaying, "validate: next level before win");
 
+		Snapshot aConveyor = aSnapshot;
+		aConveyor.sun = 0;
+		aConveyor.freeSeeds = true;
+		Check(BridgeCore::Validate(aConveyor, aPlantCommand).issue == Issue::None, "validate: conveyor seeds are free");
+
 		Snapshot aMenu = aSnapshot;
 		aMenu.status = Status::Menu;
 		Command aEnter{"c9", 0, {"enter_adventure", "", "", 0, 0}};

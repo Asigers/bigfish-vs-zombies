@@ -48,6 +48,8 @@ enum class Issue
 	SunMissing,
 	NoNextLevel,
 	NoSeedChooser,
+	SeedChooserNotReady,
+	InvalidSeedSelection,
 	NoEffect,
 	DuplicateCommand
 };
@@ -85,6 +87,25 @@ struct SunView
 	int expiresInMs = 0;
 };
 
+struct SeedOptionView
+{
+	std::string type;
+	int cost = 0;
+	bool recommended = true;
+	std::vector<std::string> warnings;
+	std::vector<std::string> requirements;
+};
+
+struct SeedChooserView
+{
+	bool active = false;
+	bool ready = false;
+	int slots = 0;
+	std::vector<SeedOptionView> availablePlants;
+	std::vector<std::string> preselected;
+	std::vector<std::string> required;
+};
+
 struct Snapshot
 {
 	std::string gameId;
@@ -99,6 +120,7 @@ struct Snapshot
 	bool hasNextLevel = true;
 	/** Conveyor / mini-game banks hand out free seeds: sun is irrelevant. */
 	bool freeSeeds = false;
+	SeedChooserView seedChooser;
 	std::vector<PlantView> plants;
 	std::vector<ZombieView> zombies;
 	std::vector<CardView> cards;
@@ -112,6 +134,7 @@ struct Action
 	std::string id;
 	int row = 0;
 	int col = 0;
+	std::vector<std::string> plants;
 };
 
 struct Command

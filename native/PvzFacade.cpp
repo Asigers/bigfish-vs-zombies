@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <format>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "LawnApp.h"
@@ -26,29 +27,88 @@ std::string SeedName(SeedType theType)
 {
 	switch (theType)
 	{
-	case SeedType::SEED_SUNFLOWER: return "sunflower";
 	case SeedType::SEED_PEASHOOTER: return "peashooter";
-	case SeedType::SEED_WALLNUT: return "wallnut";
-	case SeedType::SEED_SNOWPEA: return "snowpea";
-	case SeedType::SEED_REPEATER: return "repeater";
+	case SeedType::SEED_SUNFLOWER: return "sunflower";
 	case SeedType::SEED_CHERRYBOMB: return "cherrybomb";
+	case SeedType::SEED_WALLNUT: return "wallnut";
 	case SeedType::SEED_POTATOMINE: return "potatomine";
+	case SeedType::SEED_SNOWPEA: return "snowpea";
 	case SeedType::SEED_CHOMPER: return "chomper";
-	default: return "other";
+	case SeedType::SEED_REPEATER: return "repeater";
+	case SeedType::SEED_PUFFSHROOM: return "puffshroom";
+	case SeedType::SEED_SUNSHROOM: return "sunshroom";
+	case SeedType::SEED_FUMESHROOM: return "fumeshroom";
+	case SeedType::SEED_GRAVEBUSTER: return "gravebuster";
+	case SeedType::SEED_HYPNOSHROOM: return "hypnoshroom";
+	case SeedType::SEED_SCAREDYSHROOM: return "scaredyshroom";
+	case SeedType::SEED_ICESHROOM: return "iceshroom";
+	case SeedType::SEED_DOOMSHROOM: return "doomshroom";
+	case SeedType::SEED_LILYPAD: return "lilypad";
+	case SeedType::SEED_SQUASH: return "squash";
+	case SeedType::SEED_THREEPEATER: return "threepeater";
+	case SeedType::SEED_TANGLEKELP: return "tanglekelp";
+	case SeedType::SEED_JALAPENO: return "jalapeno";
+	case SeedType::SEED_SPIKEWEED: return "spikeweed";
+	case SeedType::SEED_TORCHWOOD: return "torchwood";
+	case SeedType::SEED_TALLNUT: return "tallnut";
+	case SeedType::SEED_SEASHROOM: return "seashroom";
+	case SeedType::SEED_PLANTERN: return "plantern";
+	case SeedType::SEED_CACTUS: return "cactus";
+	case SeedType::SEED_BLOVER: return "blover";
+	case SeedType::SEED_SPLITPEA: return "splitpea";
+	case SeedType::SEED_STARFRUIT: return "starfruit";
+	case SeedType::SEED_PUMPKINSHELL: return "pumpkinshell";
+	case SeedType::SEED_MAGNETSHROOM: return "magnetshroom";
+	case SeedType::SEED_CABBAGEPULT: return "cabbagepult";
+	case SeedType::SEED_FLOWERPOT: return "flowerpot";
+	case SeedType::SEED_KERNELPULT: return "kernelpult";
+	case SeedType::SEED_INSTANT_COFFEE: return "instantcoffee";
+	case SeedType::SEED_GARLIC: return "garlic";
+	case SeedType::SEED_UMBRELLA: return "umbrella";
+	case SeedType::SEED_MARIGOLD: return "marigold";
+	case SeedType::SEED_MELONPULT: return "melonpult";
+	case SeedType::SEED_GATLINGPEA: return "gatlingpea";
+	case SeedType::SEED_TWINSUNFLOWER: return "twinsunflower";
+	case SeedType::SEED_GLOOMSHROOM: return "gloomshroom";
+	case SeedType::SEED_CATTAIL: return "cattail";
+	case SeedType::SEED_WINTERMELON: return "wintermelon";
+	case SeedType::SEED_GOLD_MAGNET: return "goldmagnet";
+	case SeedType::SEED_SPIKEROCK: return "spikerock";
+	case SeedType::SEED_COBCANNON: return "cobcannon";
+	case SeedType::SEED_IMITATER: return "imitater";
+	default: return "unknown";
 	}
 }
 
 bool SeedFromName(const std::string& theName, SeedType& theOut)
 {
-	if (theName == "sunflower") { theOut = SeedType::SEED_SUNFLOWER; return true; }
-	if (theName == "peashooter") { theOut = SeedType::SEED_PEASHOOTER; return true; }
-	if (theName == "wallnut") { theOut = SeedType::SEED_WALLNUT; return true; }
-	if (theName == "snowpea") { theOut = SeedType::SEED_SNOWPEA; return true; }
-	if (theName == "repeater") { theOut = SeedType::SEED_REPEATER; return true; }
-	if (theName == "cherrybomb") { theOut = SeedType::SEED_CHERRYBOMB; return true; }
-	if (theName == "potatomine") { theOut = SeedType::SEED_POTATOMINE; return true; }
-	if (theName == "chomper") { theOut = SeedType::SEED_CHOMPER; return true; }
+	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
+		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
+	{
+		const SeedType aSeed = static_cast<SeedType>(anIndex);
+		if (aSeed != SeedType::SEED_IMITATER && SeedName(aSeed) == theName)
+		{
+			theOut = aSeed;
+			return true;
+		}
+	}
 	return false;
+}
+
+SeedType UpgradeRequirement(SeedType theType)
+{
+	switch (theType)
+	{
+	case SeedType::SEED_GATLINGPEA: return SeedType::SEED_REPEATER;
+	case SeedType::SEED_WINTERMELON: return SeedType::SEED_MELONPULT;
+	case SeedType::SEED_TWINSUNFLOWER: return SeedType::SEED_SUNFLOWER;
+	case SeedType::SEED_SPIKEROCK: return SeedType::SEED_SPIKEWEED;
+	case SeedType::SEED_COBCANNON: return SeedType::SEED_KERNELPULT;
+	case SeedType::SEED_GOLD_MAGNET: return SeedType::SEED_MAGNETSHROOM;
+	case SeedType::SEED_GLOOMSHROOM: return SeedType::SEED_FUMESHROOM;
+	case SeedType::SEED_CATTAIL: return SeedType::SEED_LILYPAD;
+	default: return SeedType::SEED_NONE;
+	}
 }
 
 std::string ZombieName(ZombieType theType)
@@ -136,6 +196,60 @@ Snapshot PvzFacade::Capture()
 	const bool aAdventure = app_->IsAdventureMode();
 	aSnapshot.hasNextLevel = aAdventure ? aSnapshot.level < FINAL_LEVEL : true;
 	aSnapshot.freeSeeds = aBoard->HasConveyorBeltSeedBank();
+
+	// Expose the live chooser so the same Pi session can make the seed-deck
+	// decision. A Crazy Dave dialog is advanced by the chooser-free lifecycle
+	// action first; Imitater is omitted until its secondary type is in the wire contract.
+	if (app_->mSeedChooserScreen != nullptr && app_->mCrazyDaveMessageIndex == -1 &&
+		aBoard->mCutScene != nullptr && aBoard->mCutScene->mSeedChoosing &&
+		aBoard->mSeedBank != nullptr)
+	{
+		SeedChooserScreen* aChooser = app_->mSeedChooserScreen.get();
+		aSnapshot.seedChooser.active = true;
+		aSnapshot.seedChooser.ready = aChooser->mSeedsInFlight == 0;
+		aSnapshot.seedChooser.slots = aBoard->mSeedBank->mNumPackets;
+		for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
+			anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
+		{
+			const SeedType aSeed = static_cast<SeedType>(anIndex);
+			if (aSeed == SeedType::SEED_IMITATER || !app_->HasSeedType(aSeed) ||
+				aChooser->SeedNotAllowedToPick(aSeed) || aChooser->SeedNotAllowedDuringTrial(aSeed))
+				continue;
+
+			SeedOptionView aOption;
+			aOption.type = SeedName(aSeed);
+			aOption.cost = Plant::GetCost(aSeed);
+			const unsigned int aFlags = aChooser->SeedNotRecommendedToPick(aSeed);
+			auto addWarning = [&](NotRecommend theFlag, const char* theText) {
+				if ((aFlags & (1u << static_cast<unsigned int>(theFlag))) != 0)
+					aOption.warnings.emplace_back(theText);
+			};
+			addWarning(NotRecommend::NOT_RECOMMENDED_NOCTURNAL, "nocturnal_plant_on_day_stage");
+			addWarning(NotRecommend::NOT_RECOMMENDED_NEEDS_POOL, "requires_pool");
+			addWarning(NotRecommend::NOT_RECOMMENDED_NEEDS_GRAVES, "requires_graves");
+			addWarning(NotRecommend::NOT_RECOMMENDED_NEEDS_FOG, "requires_fog");
+			addWarning(NotRecommend::NOT_RECOMMENDED_NEEDS_ROOF, "requires_roof");
+			addWarning(NotRecommend::NOT_RECOMMENDED_ON_ROOF, "not_recommended_on_roof");
+			addWarning(NotRecommend::NOT_RECOMMENDED_FOR_CHALLENGE, "not_recommended_for_challenge");
+			addWarning(NotRecommend::NOT_RECOMMENDED_AT_NIGHT, "not_recommended_at_night");
+			aOption.recommended = aOption.warnings.empty();
+
+			const SeedType aBase = UpgradeRequirement(aSeed);
+			if (!app_->IsSurvivalMode() && aBase != SeedType::SEED_NONE &&
+				app_->HasSeedType(aBase) && !aChooser->SeedNotAllowedToPick(aBase) &&
+				!aChooser->SeedNotAllowedDuringTrial(aBase))
+			{
+				aOption.requirements.push_back(SeedName(aBase));
+			}
+			aSnapshot.seedChooser.availablePlants.push_back(std::move(aOption));
+
+			const ChosenSeed& aChosen = aChooser->mChosenSeeds[aSeed];
+			if (aChosen.mSeedState == ChosenSeedState::SEED_IN_BANK)
+				aSnapshot.seedChooser.preselected.push_back(SeedName(aSeed));
+			if (aChosen.mCrazyDavePicked)
+				aSnapshot.seedChooser.required.push_back(SeedName(aSeed));
+		}
+	}
 
 	for (Plant* aPlant : aBoard->mPlants)
 	{
@@ -391,38 +505,85 @@ Issue PvzFacade::EnterAdventure()
 	return Issue::None;
 }
 
-Issue PvzFacade::ChooseSeeds()
+Issue PvzFacade::ChooseSeeds(const std::vector<std::string>& thePlants)
 {
 	if (app_ == nullptr)
 		return Issue::NoSeedChooser;
 
-	// Crazy Dave can be holding the intro (he freezes the cutscene clock until
-	// every line has been clicked through). Advance him exactly like a click,
-	// even on levels that do not offer a seed chooser.
-	int aDaveGuard = 0;
-	while (app_->mCrazyDaveMessageIndex != -1 && aDaveGuard++ < 64)
+	// Crazy Dave freezes the intro cutscene. Advancing his dialogue is
+	// lifecycle work, not a seed-deck decision.
+	if (app_->mCrazyDaveMessageIndex != -1)
 	{
-		if (!app_->AdvanceCrazyDaveText())
-			app_->CrazyDaveLeave();
+		if (!thePlants.empty())
+			return Issue::InvalidSeedSelection;
+		int aDaveGuard = 0;
+		while (app_->mCrazyDaveMessageIndex != -1 && aDaveGuard++ < 64)
+		{
+			if (!app_->AdvanceCrazyDaveText())
+				app_->CrazyDaveLeave();
+		}
+		return Issue::None;
 	}
 
-	// Conveyor-belt and mini-game levels have no chooser: dismissing Dave above
-	// is the whole job, the cutscene then starts the level by itself.
-	if (app_->mSeedChooserScreen == nullptr)
-		return Issue::None;
-	SeedChooserScreen* aChooser = app_->mSeedChooserScreen.get();
 	Board* aBoard = app_->mBoard;
-	if (aBoard == nullptr || aBoard->mSeedBank == nullptr)
+	if (aBoard == nullptr || aBoard->mCutScene == nullptr ||
+		app_->mSeedChooserScreen == nullptr || !aBoard->mCutScene->mSeedChoosing)
+		return thePlants.empty() ? Issue::None : Issue::NoSeedChooser;
+
+	SeedChooserScreen* aChooser = app_->mSeedChooserScreen.get();
+	if (aBoard->mSeedBank == nullptr)
 		return Issue::NoSeedChooser;
 	if (aChooser->mSeedsInFlight > 0)
-		return Issue::NoSeedChooser;
+		return Issue::SeedChooserNotReady;
 
 	const int aSlots = aBoard->mSeedBank->mNumPackets;
-	if (aSlots <= 0 || aSlots > SEEDBANK_MAX)
-		return Issue::NoSeedChooser;
+	if (aSlots <= 0 || aSlots > SEEDBANK_MAX ||
+		static_cast<int>(thePlants.size()) != aSlots)
+		return Issue::InvalidSeedSelection;
 
-	// Start from a clean chooser: previous attempts may have left packets in the
-	// bank, and CloseSeedChooser maps slots by index.
+	std::vector<SeedType> aAvailable;
+	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
+		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
+	{
+		const SeedType aSeed = static_cast<SeedType>(anIndex);
+		if (aSeed == SeedType::SEED_IMITATER || !app_->HasSeedType(aSeed) ||
+			aChooser->SeedNotAllowedToPick(aSeed) || aChooser->SeedNotAllowedDuringTrial(aSeed))
+			continue;
+		aAvailable.push_back(aSeed);
+	}
+
+	std::vector<SeedType> aChosen;
+	for (const auto& aName : thePlants)
+	{
+		SeedType aSeed = SeedType::SEED_NONE;
+		if (!SeedFromName(aName, aSeed) ||
+			std::find(aAvailable.begin(), aAvailable.end(), aSeed) == aAvailable.end() ||
+			std::find(aChosen.begin(), aChosen.end(), aSeed) != aChosen.end())
+			return Issue::InvalidSeedSelection;
+		aChosen.push_back(aSeed);
+	}
+
+	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
+		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
+	{
+		const SeedType aSeed = static_cast<SeedType>(anIndex);
+		if (aChooser->mChosenSeeds[aSeed].mCrazyDavePicked &&
+			std::find(aChosen.begin(), aChosen.end(), aSeed) == aChosen.end())
+			return Issue::InvalidSeedSelection;
+	}
+	if (!app_->IsSurvivalMode())
+	{
+		for (const SeedType aSeed : aChosen)
+		{
+			const SeedType aBase = UpgradeRequirement(aSeed);
+			if (aBase != SeedType::SEED_NONE && app_->HasSeedType(aBase) &&
+				std::find(aChosen.begin(), aChosen.end(), aBase) == aChosen.end())
+				return Issue::InvalidSeedSelection;
+		}
+	}
+
+	// Replace the whole ordered bank with the model's deck. Reset previous
+	// selections first because CloseSeedChooser maps packet slots by index.
 	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
 		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
 	{
@@ -434,52 +595,13 @@ Issue PvzFacade::ChooseSeeds()
 		}
 	}
 
-	std::vector<SeedType> aAvailable;
-	for (int anIndex = static_cast<int>(SeedType::SEED_PEASHOOTER);
-		anIndex < static_cast<int>(NUM_SEEDS_IN_CHOOSER); ++anIndex)
-	{
-		const SeedType aSeed = static_cast<SeedType>(anIndex);
-		if (aSeed == SeedType::SEED_IMITATER)
-			continue;
-		if (!app_->HasSeedType(aSeed))
-			continue;
-		if (aChooser->SeedNotAllowedToPick(aSeed))
-			continue;
-		if (aChooser->mChosenSeeds[aSeed].mSeedState != ChosenSeedState::SEED_IN_CHOOSER)
-			continue;
-		aAvailable.push_back(aSeed);
-	}
-	if (static_cast<int>(aAvailable.size()) < aSlots)
-		return Issue::NoSeedChooser;
-
-	// Deterministic preference order; the strategy only uses the first four.
-	static const SeedType aPreferred[] = {
-		SeedType::SEED_SUNFLOWER, SeedType::SEED_PEASHOOTER, SeedType::SEED_WALLNUT,
-		SeedType::SEED_SNOWPEA, SeedType::SEED_REPEATER, SeedType::SEED_CHERRYBOMB,
-		SeedType::SEED_POTATOMINE, SeedType::SEED_CHOMPER,
-		SeedType::SEED_LILYPAD, SeedType::SEED_FLOWERPOT
-	};
-	std::vector<SeedType> aChosen;
-	for (const SeedType aWant : aPreferred)
-	{
-		if (std::find(aAvailable.begin(), aAvailable.end(), aWant) != aAvailable.end())
-			aChosen.push_back(aWant);
-	}
-	for (const SeedType aSeed : aAvailable)
-	{
-		if (static_cast<int>(aChosen.size()) >= aSlots)
-			break;
-		if (std::find(aChosen.begin(), aChosen.end(), aSeed) == aChosen.end())
-			aChosen.push_back(aSeed);
-	}
-	aChosen.resize(static_cast<std::size_t>(aSlots));
-
 	for (int anIndex = 0; anIndex < aSlots; ++anIndex)
 	{
 		ChosenSeed& aSeed = aChooser->mChosenSeeds[aChosen[static_cast<std::size_t>(anIndex)]];
 		int aX = 0;
 		int aY = 0;
 		aChooser->GetSeedPositionInBank(anIndex, aX, aY);
+		aSeed.mSeedType = aChosen[static_cast<std::size_t>(anIndex)];
 		aSeed.mSeedIndexInBank = anIndex;
 		aSeed.mSeedState = ChosenSeedState::SEED_IN_BANK;
 		aSeed.mX = aX;
@@ -496,14 +618,10 @@ Issue PvzFacade::ChooseSeeds()
 	aChooser->mSeedsInBank = aSlots;
 	aChooser->CloseSeedChooser();
 
-	// CloseSeedChooser jumps the cutscene clock, which can skip the one-tick
-	// window that slides the seed bank down (the bank then stays off-screen and
-	// the player sees no cards). Put it where the cutscene would have left it.
-	if (aBoard->mSeedBank)
-	{
-		aBoard->mSeedBank->mCutSceneDarken = 128;
-		aBoard->mSeedBank->Move(SEED_BANK_OFFSET_X_END, 0);
-	}
+	// CloseSeedChooser can skip the one-tick slide animation. Keep the visible
+	// bank aligned with the game's normal end-of-chooser position.
+	aBoard->mSeedBank->mCutSceneDarken = 128;
+	aBoard->mSeedBank->Move(SEED_BANK_OFFSET_X_END, 0);
 	return Issue::None;
 }
 }

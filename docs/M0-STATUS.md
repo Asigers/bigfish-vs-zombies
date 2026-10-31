@@ -12,11 +12,11 @@ Legend: ✅ verified · 🟡 implemented, not runtime-verified · ⛔ blocked.
 | 1 | Build PvZ-Portable on this Apple Silicon Mac | ✅ | upstream `4585876` builds with clang 17 / Ninja; `pvz-portable` is a 3.7 MB arm64 Mach-O |
 | 2 | Run it with legally sourced GOTY assets | ✅ | Steam GOTY 1.2.0.1096 assets load (`Resource Loading Time ~1.2s`), title screen and level 1 render |
 | 3 | Embed a game-thread bridge with revisioned snapshots | ✅ | bridge serves `health`/`snapshot`/`command` from the live game; snapshots track sun, plants, zombies, cards, cutscene state |
-| 4 | Execute seed selection, plant, collect sun, shovel, next level through game mechanics | 🟡 | seed choice, planting, sun collection and level advance work in the real game; shovel and Crazy-Dave/tutorial edge cases are unit-tested only |
+| 4 | Model-selected seed deck and game actions | 🟡 | LLM deck selection, chooser metadata and native validation are implemented in this refactor; this new path still needs native build and live-game verification |
 | 5 | Never retry ambiguously acknowledged actions; reconcile with next snapshot | ✅ | `tests/executor.test.mjs` (timeout → ambiguous → verified / abandoned, one wire call), `native/tests/core_test.cpp` (duplicate id never re-applies), live journal shows 0 ambiguous / 0 abandoned across 226+ commands |
 | 6 | Pass ≥ 10 levels plus restart/save tests on the Mac | 🟡 | real game: levels **1 and 2 cleared** end-to-end (seed choice → play → next level); 10-level soak + engine save/restart still pending |
 
-## Real-game evidence (2026-10-30, macOS 26.6 / arm64)
+## Real-game evidence before the current seed-deck refactor (2026-10-30, macOS 26.6 / arm64)
 
 Controller against the live game (`--engine=bridge --tick=300`), assets from a
 purchased Steam copy, bridge token kept local:
@@ -31,9 +31,10 @@ Per level the controller performed, with no human input:
 
 1. `enter_adventure` — created the bot profile, skipped the first-time tutorial,
    built the board (menu → intro);
-2. `choose_seeds` — dismissed Crazy Dave, filled the bank deterministically
-   (sunflower/peashooter/wallnut/snowpea/repeater…), closed the chooser
-   (intro → playing);
+2. `choose_seeds` — the previous live implementation dismissed Crazy Dave and
+   filled the bank deterministically (sunflower/peashooter/wallnut/snowpea/repeater…)
+   before closing the chooser (intro → playing); the current refactor replaces this
+   fixed deck with a model-selected ordered deck.
 3. planted 18–24 plants per level, collected sun, defended lanes;
 4. on win, `next_level` advanced the profile and started the next board.
 
@@ -46,23 +47,24 @@ fixed on the way:
 - the intro cutscene is frozen while Crazy Dave holds a dialog line; the facade
   now advances/ends it exactly like a click.
 
-## What is actually proven
+## What was proven before the current refactor
 
-```bash
-npm test          # 48 passing: contract, policy, executor, sim, campaign, journal,
-                  #            bridge client, audience, Douyin callback verifier
-npm run test:native
-                  # clones + patches PvZ-Portable at a pinned commit, builds the
-                  # bridge into the game, runs 28 native checks
-```
+The baseline branch previously passed its controller and native test suites.
+The current seed-deck changes add new tests and a native facade extension; those
+new checks must run before this refactor can be considered verified.
 
 - Ten deterministic simulated levels complete with zero rejected commands, zero
   abandoned intents, no command-id reuse, and every journaled command resolved
   exactly once.
-- The native bridge compiles against real upstream headers, so the facade API calls
-  are type-correct (not guesses).
-- The bridge's protocol, idempotency and revision rules are exercised natively over
-  a real loopback socket.
+- The previous native bridge compiled against real upstream headers. The changed
+  seed-chooser facade still needs to be rebuilt against the pinned upstream commit.
+- The bridge's existing protocol, idempotency and revision rules were exercised
+  natively over a real loopback socket.
+
+The existing level 1–2 live evidence predates the current model-selected seed-deck
+refactor. It does not validate the new chooser snapshot, deck selection or ordered
+seed-bank application. A GitHub Actions workflow has been added to run the updated
+controller and native build/test suites after the changes are committed.
 
 ## What is *not* proven yet
 

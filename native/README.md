@@ -16,7 +16,7 @@ on loopback. It is the only place where game state is read or written.
 | `Module.{h,cpp}` | `PumpBridge(LawnApp*)` / `ShutdownBridge()` |
 | `Bridge.cmake` | injected into the PvZ-Portable build |
 | `patches/0001-bridge-hooks.patch` | 2 hook lines + 1 CMake include, pinned to a commit |
-| `tests/core_test.cpp` | 28 checks with a fake engine, including real HTTP |
+| `tests/core_test.cpp` | fake-engine validation, model-selected deck and real HTTP checks |
 
 ## Build and test without the game
 
@@ -53,6 +53,10 @@ On startup the game prints `[bigfish-bridge] listening on http://127.0.0.1:45941
   An "applied" action that changes nothing becomes `rejected: no_effect`.
 - **Dedupe before execution.** A repeated `commandId` returns the stored receipt and
   is never applied twice; the same id while in flight returns HTTP 409.
+- **Model-selected deck.** The snapshot exposes unlocked/allowed plants, costs,
+  advisory stage warnings, mandatory tutorial picks and upgrade dependencies.
+  `choose_seeds` applies the model-selected ordered deck through the real chooser
+  on the game thread.
 - **No direct state writes.** `PvzFacade` uses the engine's own functions
   (`CanPlantAt`, `TakeSunMoney`, `AddPlant`, `SeedPacket::WasPlanted`,
   `Coin::Collect`, `Plant::Die`, `NewGame`), mirroring what a click does.
@@ -66,7 +70,7 @@ portable C++20.
 
 ## Known gaps
 
-- Seed chooser automation (PvZ asks for seeds before each level).
-- `next_level` is compiled but never executed against a real board.
+- Imitater is excluded until its secondary plant-type choice is represented.
+- Real-game progression and long campaign soak remain separate runtime acceptance tests.
 - `blocked` cells are empty; `CanPlantAt` is the authority.
 - Sun lifetime (`expiresInMs`) is not projected.

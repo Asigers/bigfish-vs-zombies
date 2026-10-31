@@ -9,14 +9,11 @@ import {
   viewForModel
 } from "../domain/contract.mjs"
 import {ContractError, ProtocolError, TransportError} from "../domain/errors.mjs"
-import {candidates, threatRows} from "../domain/policy.mjs"
 import {OUTCOME} from "./executor.mjs"
 import {systemClock, withTimeout} from "./tick-loop.mjs"
 
 export const DEFAULT_CONFIG = Object.freeze({
   targetLevels: 10,
-  /** A safety-only intervention threshold; ordinary strategy belongs to the AI. */
-  emergencyX: 2.4,
   maxCommandsPerLevel: 400,
   minActionIntervalMs: 250,
   sunUrgentMs: 5000,
@@ -77,7 +74,7 @@ export class Orchestrator {
     this.startedAt = this.clock.now()
     this.levelStartedAt = this.startedAt
     this.lastActionAt = 0
-    this.lastSpeechAt = 0
+    this.lastSpeechAt = Number.NEGATIVE_INFINITY
     this.lastSpeech = ""
     this.levels = []
 
@@ -90,6 +87,12 @@ export class Orchestrator {
     this.lastAction = null
     this.lastPlanError = null
     this.nextAgentAttemptAt = 0
+    this.lastDeck = []
+    this.lastDeckStrategy = null
+    this.deckHistory = []
+    this.pendingDeck = null
+    this.pendingDeckStrategy = null
+    this.lastDeckError = null
 
     /** Actions rejected at the current revision are never resent. */
     this.rejections = {revision: -1, keys: new Set()}
@@ -109,7 +112,9 @@ export class Orchestrator {
       readFailures: 0,
       sunsCollected: 0,
       levelCommands: 0,
-      speechFailures: 0
+      speechFailures: 0,
+      deckSelections: 0,
+      deckSelectionFailures: 0
     }
   }
 
@@ -222,41 +227,6 @@ export class Orchestrator {
     return null
   }
 
-  #filterRejected(actions) {
-    if (!this.rejections.keys.size) return actions
-    return actions.filter((action) => !this.rejections.keys.has(actionKey(action)))
-  }
-
-  /** Last-resort safety intervention only; it is not the normal strategy path. */
-  #emergencyAction(snapshot) {
-    const threatened = threatRows(snapshot).filter((threat) =>
-      threat.closestX < this.config.emergencyX && threat.closestX >= 1.5)
-    if (!threatened.length) return null
-
-    const offered = this.#filterRejected(candidates(snapshot, this.#challenge()))
-      .filter((action) => action.type === ACTION.PLANT)
-    const shooters = (row) => snapshot.plants.filter((plant) =>
-      plant.row === row && (plant.type === "peashooter" || plant.type === "snowpea"))
-
-    for (const threat of threatened) {
-      if (shooters(threat.row).length) continue
-      for (const plant of ["peashooter", "snowpea"]) {
-        const action = offered.find((candidate) =>
-          candidate.plant === plant && candidate.row === threat.row)
-        if (action) return action
-      }
-    }
-    for (const threat of threatened) {
-      if (!shooters(threat.row).length) continue
-      if (snapshot.plants.some((plant) =>
-        plant.row === threat.row && plant.type === "wallnut")) continue
-      const wall = offered.find((candidate) =>
-        candidate.plant === "wallnut" && candidate.row === threat.row)
-      if (wall) return wall
-    }
-    return null
-  }
-
   #planIsStale(snapshot) {
     if (!this.plan.length || !this.planMeta) return true
     const meta = this.planMeta
@@ -318,6 +288,97 @@ export class Orchestrator {
       if (issue) return {error: issue, action: first}
     }
     return {plan}
+  }
+
+  async #selectDeck(snapshot) {
+    if (this.clock.now() < this.nextAgentAttemptAt) return null
+    const chooser = snapshot.seedChooser
+    if (!chooser?.active || !chooser.ready) return null
+
+    const challenge = this.#challenge()
+    const context = {
+      level: snapshot.level,
+      targetLevels: this.config.targetLevels,
+      challenge,
+      audience: {
+        vote: this.audience?.summary?.() ?? null,
+        messages: this.audience?.peekMessages?.(8) ?? [],
+        challenge
+      },
+      previousDeck: this.lastDeck,
+      previousDeckStrategy: this.lastDeckStrategy,
+      deckHistory: this.deckHistory.slice(-5),
+      lastDeckError: this.lastDeckError
+    }
+
+    try {
+      if (typeof this.agent.selectDeck !== "function") {
+        throw new Error("agent does not implement selectDeck; refusing to invent a default deck")
+      }
+      const selection = await withTimeout(
+        Promise.resolve(this.agent.selectDeck({
+          observation: viewForModel(snapshot),
+          seedChooser: chooser,
+          context
+        })),
+        this.config.agentTimeoutMs
+      )
+      if (selection === null) {
+        this.nextAgentAttemptAt = this.clock.now() + this.config.agentRetryMs
+        return null
+      }
+      if (!Array.isArray(selection.plants)) {
+        throw new Error("deck decision must contain a plants array")
+      }
+
+      const action = {
+        type: ACTION.CHOOSE_SEEDS,
+        plants: [...selection.plants],
+        gameId: snapshot.gameId,
+        revision: snapshot.revision
+      }
+      const key = actionKey(action)
+      if (this.rejections.revision === snapshot.revision && this.rejections.keys.has(key)) {
+        this.lastDeckError = "rejected_at_current_revision"
+        this.nextAgentAttemptAt = this.clock.now() + this.config.agentRetryMs
+        return null
+      }
+      const issue = validateAction(snapshot, action, challenge)
+      if (issue) {
+        this.stats.invalidDecisions += 1
+        this.stats.deckSelectionFailures += 1
+        this.lastDeckError = issue
+        this.nextAgentAttemptAt = this.clock.now() + this.config.agentRetryMs
+        this.#emit("invalid_deck", {issue, deck: selection.plants})
+        return null
+      }
+
+      const normalized = {
+        action,
+        strategy: typeof selection.strategy === "string"
+          ? selection.strategy.slice(0, 180)
+          : "模型自主选择卡组",
+        speech: typeof selection.speech === "string" ? selection.speech.slice(0, 120) : ""
+      }
+      this.stats.deckSelections += 1
+      this.lastDeckError = null
+      this.nextAgentAttemptAt = 0
+      this.audience?.clearMessages?.()
+      this.#emit("deck_selected", {
+        deck: [...action.plants],
+        strategy: normalized.strategy
+      })
+      return normalized
+    } catch (error) {
+      if (error?.kind === "cancelled") this.stats.agentTimeouts += 1
+      else this.stats.agentFailures += 1
+      this.stats.deckSelectionFailures += 1
+      this.lastDeckError = error.message
+      this.nextAgentAttemptAt = this.clock.now() + this.config.agentRetryMs
+      this.#emit("deck_selection_error", {message: error.message})
+      this.logger?.warn?.("seed deck selection unavailable: " + error.message)
+      return null
+    }
   }
 
   async #decide(snapshot) {
@@ -390,7 +451,7 @@ export class Orchestrator {
     }
   }
 
-  async #act(snapshot, action, {reason = "agent", speech = ""} = {}) {
+  async #act(snapshot, action, {reason = "agent", speech = "", deckStrategy = null} = {}) {
     const challenge = this.#challenge()
     const result = await this.executor.submit(snapshot, action, {challenge, reason})
     this.lastActionAt = this.clock.now()
@@ -399,7 +460,14 @@ export class Orchestrator {
     if (result.outcome === OUTCOME.REJECTED) {
       this.rejections.keys.add(actionKey(action))
       this.#emit("command_rejected", {action, issue: result.issue, reason})
-      if (reason === "agent_plan" || reason === "emergency") this.#clearPlan("command_rejected")
+      if (reason === "agent_plan") this.#clearPlan("command_rejected")
+      if (reason === "deck_selection") {
+        this.stats.deckSelectionFailures += 1
+        this.lastDeckError = result.issue ?? "deck_selection_rejected"
+        this.pendingDeck = null
+        this.pendingDeckStrategy = null
+        this.nextAgentAttemptAt = this.clock.now() + this.config.agentRetryMs
+      }
     }
     if (result.outcome === OUTCOME.AMBIGUOUS) this.stats.ambiguous += 1
     if (result.outcome === OUTCOME.ACKNOWLEDGED) this.stats.acknowledged += 1
@@ -407,8 +475,12 @@ export class Orchestrator {
     if (result.outcome === OUTCOME.ACKNOWLEDGED || result.outcome === OUTCOME.AMBIGUOUS) {
       this.pendingSpeech = speech
       if (reason === "agent_plan") this.pendingPlanAction = action
+      if (reason === "deck_selection") {
+        this.pendingDeck = [...(action.plants ?? [])]
+        this.pendingDeckStrategy = deckStrategy
+      }
     }
-    await this.#afterOutcome(result, snapshot, {speech})
+    await this.#afterOutcome(result, snapshot, {speech, deckStrategy})
     return result
   }
 
@@ -421,12 +493,25 @@ export class Orchestrator {
     this.#emit("narration", {text: this.lastSpeech, level})
   }
 
-  async #afterOutcome(result, snapshot, {speech = ""} = {}) {
+  async #afterOutcome(result, snapshot, {speech = "", deckStrategy = null} = {}) {
     if (!result) return
     switch (result.outcome) {
       case OUTCOME.VERIFIED: {
         this.stats.verified += 1
         if (result.action?.type === ACTION.COLLECT_SUN) this.stats.sunsCollected += 1
+        if (result.action?.type === ACTION.CHOOSE_SEEDS && result.action.plants?.length) {
+          this.lastDeck = [...result.action.plants]
+          this.lastDeckStrategy = this.pendingDeckStrategy ?? deckStrategy ?? "模型自主选择卡组"
+          this.deckHistory.push({
+            level: snapshot.level,
+            deck: [...this.lastDeck],
+            strategy: this.lastDeckStrategy
+          })
+          this.pendingDeck = null
+          this.pendingDeckStrategy = null
+          this.lastDeckError = null
+          this.#emit("deck_verified", {deck: [...this.lastDeck], strategy: this.lastDeckStrategy})
+        }
         if (this.pendingPlanAction &&
             actionKey(this.pendingPlanAction) === actionKey(result.action)) {
           if (this.plan.length && actionKey(this.plan[0]) === actionKey(result.action)) {
@@ -451,10 +536,18 @@ export class Orchestrator {
       case OUTCOME.REJECTED:
         this.stats.rejected += 1
         this.pendingPlanAction = null
+        if (result.action?.type === ACTION.CHOOSE_SEEDS) {
+          this.pendingDeck = null
+          this.pendingDeckStrategy = null
+        }
         break
       case OUTCOME.ABANDONED:
         this.stats.abandoned += 1
         this.pendingPlanAction = null
+        if (result.action?.type === ACTION.CHOOSE_SEEDS) {
+          this.pendingDeck = null
+          this.pendingDeckStrategy = null
+        }
         this.#clearPlan("command_abandoned")
         this.#emit("command_abandoned", {action: result.action, reason: result.reason})
         break
@@ -497,15 +590,42 @@ export class Orchestrator {
       return {state: "next_level"}
     }
 
-    // Bootstrap and campaign progression are deterministic lifecycle work.
-    if (snapshot.status === STATUS.MENU || snapshot.status === STATUS.INTRO) {
+    // A real chooser (including a Survival repick) belongs to the model.
+    // Do this before the ordinary PLAYING/PAUSED gate because the game may
+    // report a chooser while its coarse status is paused or playing.
+    if (snapshot.seedChooser?.active) {
+      this.#clearPlan("seed_selection")
+      if (!snapshot.seedChooser.ready) return {state: "seed_chooser_waiting"}
+      const selection = await this.#selectDeck(snapshot)
+      if (!selection) return {state: "deck_selection_unavailable"}
+      await this.#act(snapshot, selection.action, {
+        reason: "deck_selection",
+        speech: selection.speech,
+        deckStrategy: selection.strategy
+      })
+      return {state: "deck_selection"}
+    }
+
+    if (snapshot.status === STATUS.MENU) {
       this.#clearPlan("bootstrap")
-      const type = snapshot.status === STATUS.MENU
-        ? ACTION.ENTER_ADVENTURE
-        : ACTION.CHOOSE_SEEDS
-      const action = {type, gameId: snapshot.gameId, revision: snapshot.revision}
+      const action = {type: ACTION.ENTER_ADVENTURE, gameId: snapshot.gameId, revision: snapshot.revision}
       await this.#act(snapshot, action, {reason: "bootstrap"})
-      return {state: snapshot.status}
+      return {state: "menu"}
+    }
+
+    // An intro without a chooser is a conveyor/mini-game transition or a
+    // Crazy Dave dialog. The bridge advances that lifecycle without choosing
+    // a deck; it must never synthesize plants here.
+    if (snapshot.status === STATUS.INTRO) {
+      this.#clearPlan("chooser_free_intro")
+      const action = {
+        type: ACTION.CHOOSE_SEEDS,
+        plants: [],
+        gameId: snapshot.gameId,
+        revision: snapshot.revision
+      }
+      await this.#act(snapshot, action, {reason: "bootstrap"})
+      return {state: "intro"}
     }
 
     if (snapshot.status !== STATUS.PLAYING) return {state: snapshot.status}
@@ -522,14 +642,6 @@ export class Orchestrator {
     if (urgentSun) {
       await this.#act(snapshot, urgentSun, {reason: "sun_urgent"})
       return {state: "collect_sun"}
-    }
-
-    // This is a safety brake, not a default plant-placement strategy.
-    const emergency = this.#emergencyAction(snapshot)
-    if (emergency) {
-      this.#clearPlan("emergency_defence")
-      await this.#act(snapshot, emergency, {reason: "emergency"})
-      return {state: "emergency"}
     }
 
     if (this.plan.length && this.#planIsStale(snapshot)) {
@@ -637,6 +749,11 @@ export class Orchestrator {
       status: this.snapshot?.status ?? null,
       revision: this.snapshot?.revision ?? null,
       lastSpeech: this.lastSpeech,
+      deck: this.lastDeck,
+      deckStrategy: this.lastDeckStrategy,
+      deckHistory: this.deckHistory,
+      pendingDeck: this.pendingDeck,
+      lastDeckError: this.lastDeckError,
       strategy: this.strategy,
       plan: this.plan,
       pending: this.executor.describe(),

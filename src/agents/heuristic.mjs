@@ -22,6 +22,44 @@ export class HeuristicAgent {
     this.name = "heuristic"
   }
 
+  async selectDeck({seedChooser, context = {}}) {
+    const banned = new Set(context.challenge?.bannedPlants ?? [])
+    const options = new Map(seedChooser.availablePlants.map((option) => [option.type, option]))
+    const selected = []
+    const add = (type) => {
+      if (selected.includes(type)) return true
+      if (banned.has(type)) return false
+      const option = options.get(type)
+      if (!option || selected.length >= seedChooser.slots) return false
+      for (const required of option.requirements) {
+        if (!add(required)) return false
+      }
+      if (selected.length >= seedChooser.slots) return false
+      selected.push(type)
+      return true
+    }
+
+    for (const required of seedChooser.required) {
+      if (!add(required)) return null
+    }
+    const preferred = ["sunflower", "peashooter", "wallnut", "snowpea", "repeater", "cherrybomb"]
+    const candidates = [
+      ...preferred,
+      ...seedChooser.availablePlants.filter((option) => option.recommended).map((option) => option.type),
+      ...seedChooser.availablePlants.map((option) => option.type)
+    ]
+    for (const type of candidates) {
+      if (selected.length >= seedChooser.slots) break
+      add(type)
+    }
+    if (selected.length !== seedChooser.slots) return null
+    return {
+      plants: selected,
+      strategy: "确定性降级卡组：经济、输出与防线均衡配置",
+      speech: "先把经济和基础防线搭起来。"
+    }
+  }
+
   async decide({snapshot, context = {}}) {
     const challenge = context.challenge ?? this.challenge
     const legal = candidates(snapshot, challenge).filter((action) =>

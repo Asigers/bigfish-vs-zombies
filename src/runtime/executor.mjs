@@ -32,8 +32,13 @@ export function effectVisible(snapshot, action, {level} = {}) {
       return snapshot.level > (level ?? snapshot.level) || snapshot.status !== "won"
     case ACTION.ENTER_ADVENTURE:
       return snapshot.status !== "menu"
-    case ACTION.CHOOSE_SEEDS:
-      return snapshot.status === "playing"
+    case ACTION.CHOOSE_SEEDS: {
+      const plants = action.plants ?? []
+      if (!plants.length) return snapshot.seedChooser?.active === true || snapshot.status !== "intro"
+      const deckVisible = snapshot.cards.length === plants.length &&
+        plants.every((plant, index) => snapshot.cards[index]?.type === plant)
+      return deckVisible && snapshot.seedChooser?.active !== true
+    }
     default:
       return false
   }

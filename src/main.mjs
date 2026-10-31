@@ -124,7 +124,7 @@ async function main() {
   let game
   if (args.engine === "sim") {
     clock = new VirtualClock(0)
-    game = new SimulatedGame({seed: args.seed, levels: args.levels, now: () => clock.now()})
+    game = new SimulatedGame({seed: args.seed, levels: args.levels, now: () => clock.now(), startInIntro: true, seedSlots: 4})
   } else {
     game = new BridgeClient({
       url: args.url ?? process.env.BIGFISH_BRIDGE_URL ?? "http://127.0.0.1:45941",
@@ -168,6 +168,8 @@ async function main() {
     onEvent: (event) => {
       if (event.type === "narration") logger.info("BigFish: " + event.text)
       if (event.type === "strategy_update") logger.info("BigFish strategy: " + event.goal)
+      if (event.type === "deck_selected") logger.info("BigFish deck proposal: " + event.deck.join(", "))
+      if (event.type === "deck_verified") logger.info("BigFish deck confirmed: " + event.deck.join(", "))
       if (overlay && speech.accept(event)) {
         const line = speechForEvent(event, {level: event.level ?? 1})
         if (line) overlay.publish(line)
@@ -240,6 +242,8 @@ async function main() {
     engine: args.engine,
     agent: agentName,
     finished: summary.finished,
+    deck: summary.deck,
+    deckStrategy: summary.deckStrategy,
     failure: failure?.message ?? null,
     levels: summary.levels.map((level) => ({
       level: level.level,

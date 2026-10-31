@@ -19,7 +19,7 @@ public:
 	Issue Shovel(const Action& theAction) override;
 	Issue NextLevel() override;
 	Issue EnterAdventure() override;
-	Issue ChooseSeeds() override;
+	Issue ChooseSeeds(const std::vector<std::string>& thePlants) override;
 	std::string DiagnosticsJson() override;
 
 private:

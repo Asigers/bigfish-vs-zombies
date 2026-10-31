@@ -155,3 +155,53 @@ test("conveyor banks hand out free seeds", () => {
   const paid = snapshot({sun: 0, cards: [{type: "wallnut", cost: 50, ready: true}]})
   assert.equal(validateAction(paid, {type: ACTION.PLANT, plant: "wallnut", row: 1, col: 1, gameId: "g1", revision: 1}), ISSUE.INSUFFICIENT_SUN)
 })
+
+test("seed chooser validation enforces slots, unlocks, dependencies and mandatory picks", () => {
+  const chooser = snapshot({
+    status: STATUS.INTRO,
+    cards: [],
+    seedChooser: {
+      active: true,
+      ready: true,
+      slots: 2,
+      availablePlants: [
+        {type: "sunflower", cost: 50, recommended: true, warnings: [], requirements: []},
+        {type: "peashooter", cost: 100, recommended: true, warnings: [], requirements: []},
+        {type: "repeater", cost: 200, recommended: true, warnings: [], requirements: []},
+        {type: "gatlingpea", cost: 250, recommended: false, warnings: [], requirements: ["repeater"]}
+      ],
+      preselected: ["sunflower"],
+      required: ["sunflower"]
+    }
+  })
+  const deck = {
+    type: ACTION.CHOOSE_SEEDS,
+    plants: ["sunflower", "peashooter"],
+    gameId: "g1",
+    revision: 1
+  }
+  assert.equal(validateAction(chooser, deck), null)
+  assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "gatlingpea"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, {...deck, plants: ["peashooter", "repeater"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "sunflower"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "unknown"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, deck, {bannedPlants: ["peashooter"]}), ISSUE.CHALLENGE_BAN)
+
+  const waiting = snapshot({
+    status: STATUS.INTRO,
+    cards: [],
+    seedChooser: {
+      active: true, ready: false, slots: 2,
+      availablePlants: [
+        {type: "sunflower", cost: 50, recommended: true, warnings: [], requirements: []},
+        {type: "peashooter", cost: 100, recommended: true, warnings: [], requirements: []}
+      ],
+      preselected: [], required: []
+    }
+  })
+  assert.equal(validateAction(waiting, deck), ISSUE.SEED_CHOOSER_NOT_READY)
+
+  const chooserFree = snapshot({status: STATUS.INTRO, cards: []})
+  assert.equal(validateAction(chooserFree, {...deck, plants: []}), null)
+  assert.equal(validateAction(chooserFree, deck), ISSUE.NO_SEED_CHOOSER)
+})

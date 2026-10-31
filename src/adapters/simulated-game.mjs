@@ -95,16 +95,17 @@ export class SimulatedGame {
    * @param {() => number} [options.now] injected clock (defaults to wall clock)
    * @param {number} [options.commandLatencyMs] simulated round-trip latency
    */
-  constructor({seed = 7, levels = 10, startLevel = 1, now = () => Date.now(), commandLatencyMs = 0} = {}) {
+  constructor({seed = 7, levels = 10, startLevel = 1, now = () => Date.now(), commandLatencyMs = 0, startInIntro = false, seedSlots = 4} = {}) {
     this.seed = seed
     this.levels = levels
     this.now = now
     this.commandLatencyMs = commandLatencyMs
+    this.startInIntro = startInIntro
+    this.seedSlots = seedSlots
     this.receipts = new Map()
     this.receiptOrder = []
     this.gameId = `sim-${seed}`
     this.#resetLevel(startLevel)
-    this.state.status = STATUS.PLAYING
     this.state.lastAdvance = this.now()
     this.state.revision = 1
   }
@@ -122,7 +123,7 @@ export class SimulatedGame {
       gameId: this.gameId,
       revision: this.state?.revision ?? 1,
       level,
-      status: STATUS.PLAYING,
+      status: this.startInIntro ? STATUS.INTRO : STATUS.PLAYING,
       sun: START_SUN,
       timeMs: 0,
       lastAdvance: this.now(),
@@ -135,7 +136,21 @@ export class SimulatedGame {
       plants: [],
       zombies: [],
       suns: [],
-      cards: this.#createCards(),
+      cards: this.startInIntro ? {} : this.#createCards(),
+      seedChooser: this.startInIntro ? {
+        active: true,
+        ready: true,
+        slots: this.seedSlots,
+        availablePlants: Object.entries(PLANT_DEFS).map(([type, def]) => ({
+          type,
+          cost: def.cost,
+          recommended: true,
+          warnings: [],
+          requirements: []
+        })),
+        preselected: [],
+        required: []
+      } : null,
       mowers: Array.from({length: ROWS}, () => true),
       nextId: 1,
       rngState: (this.seed * 7919 + level * 104729) >>> 0,
@@ -177,7 +192,8 @@ export class SimulatedGame {
         expiresInMs: Math.max(0, Math.round(s.ttlMs))
       })),
       cards: Object.entries(state.cards).map(([type, card]) => ({type, cost: card.cost, ready: card.ready})),
-      blocked: []
+      blocked: [],
+      seedChooser: state.seedChooser
     })
   }
 
@@ -435,6 +451,15 @@ export class SimulatedGame {
         st.plants = st.plants.filter((p) => !(p.row === action.row && p.col === action.col))
         break
       }
+      case ACTION.CHOOSE_SEEDS: {
+        if (st.seedChooser?.active) {
+          const allCards = this.#createCards()
+          st.cards = Object.fromEntries(action.plants.map((type) => [type, {...allCards[type]}]))
+        }
+        st.seedChooser = null
+        st.status = STATUS.PLAYING
+        break
+      }
       case ACTION.NEXT_LEVEL: {
         const next = st.level + 1
         const carriedRevision = st.revision + 1
@@ -457,6 +482,8 @@ export class SimulatedGame {
     return {
       seed: this.seed,
       levels: this.levels,
+      startInIntro: this.startInIntro,
+      seedSlots: this.seedSlots,
       gameId: this.gameId,
       state: {
         ...st,
@@ -477,7 +504,9 @@ export class SimulatedGame {
       levels: exported.levels,
       startLevel: state.level,
       now,
-      commandLatencyMs: 0
+      commandLatencyMs: 0,
+      startInIntro: exported.startInIntro ?? false,
+      seedSlots: exported.seedSlots ?? 4
     })
     sim.gameId = exported.gameId
     sim.state = {

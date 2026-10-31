@@ -26,7 +26,7 @@ must not issue commands while `ready` is false.
 {"snapshot":{
   "schema":1,"gameId":"pvz-portable","revision":812,
   "level":4,"wave":2,"totalWaves":5,"sun":175,
-  "rows":5,"columns":9,"status":"playing","hasNextLevel":true,
+  "rows":5,"columns":9,"status":"playing","hasNextLevel":true,"seedChooser":null,
   "plants":[{"type":"peashooter","row":3,"col":2,"health":300}],
   "zombies":[{"type":"cone","row":3,"x":6.412,"health":420}],
   "cards":[{"type":"peashooter","cost":100,"ready":true}],
@@ -42,6 +42,13 @@ must not issue commands while `ready` is false.
   a missing value as "not urgent".
 - `blocked` lists cells that cannot be planted on (graves). The current PvZ facade
   returns an empty list and relies on `CanPlantAt` for the real check.
+- `seedChooser` is null when no seed chooser is active. During a chooser it
+  contains `active`, `ready`, `slots`, `availablePlants`, `preselected` and
+  `required`. Each available plant has a stable type ID, sun cost, advisory
+  warnings, a recommended flag and any hard upgrade dependencies. `ready:false`
+  means seed animations are still in flight; wait rather than submitting a deck.
+  A chooser may be active during a Survival repick even when status is playing
+  or paused. Imitater is omitted until its secondary type is supported.
 
 ### `POST /v1/command`
 
@@ -57,6 +64,7 @@ Actions:
 | `plant` | `plant,row,col` | playing, in bounds, empty, card ready, enough sun |
 | `collect_sun` | `id` | playing, sun id present |
 | `shovel` | `row,col` | playing, plant present |
+| `choose_seeds` | ordered `plants` array | chooser active and ready; exact slot count; unique unlocked plants; required picks and upgrade dependencies satisfied. Empty array is allowed only for chooser-free intro transitions. |
 | `next_level` | — | `status == "won"` and `hasNextLevel` |
 
 Response (`200`):
@@ -81,7 +89,8 @@ but the projection does not change, the bridge converts the receipt to
 Issues: `stale_state`, `future_state`, `not_playing`, `bad_action`,
 `unsupported_action`, `out_of_bounds`, `occupied`, `blocked`, `no_plant`,
 `missing_card`, `cooldown`, `insufficient_sun`, `sun_missing`, `no_next_level`,
-`no_effect`, `duplicate_command`.
+`no_seed_chooser`, `seed_chooser_not_ready`, `invalid_seed_selection`, `no_effect`,
+`duplicate_command`.
 
 HTTP status codes:
 

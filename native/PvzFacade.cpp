@@ -495,6 +495,15 @@ Issue PvzFacade::ChooseSeeds()
 	}
 	aChooser->mSeedsInBank = aSlots;
 	aChooser->CloseSeedChooser();
+
+	// CloseSeedChooser jumps the cutscene clock, which can skip the one-tick
+	// window that slides the seed bank down (the bank then stays off-screen and
+	// the player sees no cards). Put it where the cutscene would have left it.
+	if (aBoard->mSeedBank)
+	{
+		aBoard->mSeedBank->mCutSceneDarken = 128;
+		aBoard->mSeedBank->Move(SEED_BANK_OFFSET_X_END, 0);
+	}
 	return Issue::None;
 }
 }

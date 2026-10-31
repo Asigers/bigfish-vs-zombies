@@ -7,9 +7,12 @@
 #include <memory>
 #include <string>
 
+#include <SDL.h>
+
 #include "BridgeCore.h"
 #include "HttpServer.h"
 #include "PvzFacade.h"
+#include "LawnApp.h"
 
 namespace bigfish
 {
@@ -20,6 +23,8 @@ std::unique_ptr<BridgeCore> gCore;
 std::unique_ptr<HttpServer> gServer;
 bool gAttempted = false;
 bool gEnabled = false;
+bool gRaised = false;
+bool gKeepActive = false;
 
 void Log(const std::string& theMessage)
 {
@@ -84,6 +89,7 @@ void StartOnce(LawnApp* theApp)
 		return;
 	}
 	gEnabled = true;
+	gKeepActive = std::getenv("BIGFISH_BRIDGE_KEEP_ACTIVE") != nullptr;
 	Log("listening on http://127.0.0.1:" + std::to_string(gServer->BoundPort()));
 }
 }
@@ -93,6 +99,26 @@ void PumpBridge(LawnApp* theApp)
 	StartOnce(theApp);
 	if (!gEnabled || !gCore)
 		return;
+
+	// The stage must stay capturable: macOS stops compositing (and OBS then sees
+	// a stale frame) for a window that is hidden, minimised or on another Space.
+	// Raise it once, and optionally pin it above other windows for unattended runs.
+	if (!gRaised && theApp != nullptr && theApp->mWindow != nullptr)
+	{
+		auto* aWindow = static_cast<SDL_Window*>(theApp->mWindow);
+		SDL_ShowWindow(aWindow);
+		SDL_RaiseWindow(aWindow);
+		if (gKeepActive)
+			SDL_SetWindowAlwaysOnTop(aWindow, SDL_TRUE);
+		gRaised = true;
+		Log(gKeepActive ? "window raised and pinned on top" : "window raised");
+	}
+	if (gKeepActive && theApp != nullptr)
+	{
+		theApp->mActive = true;
+		theApp->mMinimized = false;
+	}
+
 	gCore->Pump();
 }
 

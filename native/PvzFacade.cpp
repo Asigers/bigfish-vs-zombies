@@ -378,9 +378,16 @@ Issue PvzFacade::EnterAdventure()
 	}
 	app_->mPlayerInfo = aProfile;
 
-	// Start the profile's current level; a stale mid-level save is intentionally
-	// not resumed, so a bot session always begins from a known board.
-	app_->PreNewGame(GameMode::GAMEMODE_ADVENTURE, false);
+	// Start the profile's current level. FastLoad is the engine's own "skip the
+	// title screen and start" path: it removes mTitleScreen before building the
+	// board. Calling PreNewGame directly leaves the title widget on top, so the
+	// board plays invisibly underneath it.
+	if (app_->mGameSelector)
+		app_->KillGameSelector();
+	if (app_->mTitleScreen)
+		app_->FastLoad(GameMode::GAMEMODE_ADVENTURE);
+	else
+		app_->PreNewGame(GameMode::GAMEMODE_ADVENTURE, false);
 	return Issue::None;
 }
 

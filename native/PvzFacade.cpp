@@ -321,7 +321,8 @@ std::string PvzFacade::DiagnosticsJson()
 			",\"tutorial\":{},\"seedChoosing\":{},\"boardUpdates\":{},\"sunCountdown\":{}"
 			",\"zombieCountdown\":{},\"wave\":{},\"totalWaves\":{},\"packets\":{},"
 			"\"cutsceneTime\":{},\"preUpdating\":{},\"crazyDaveMsg\":{},\"chooseSeeds\":{},"
-			"\"gameMode\":{},\"boardLevel\":{},\"finishedAdventure\":{},\"firstTime\":{}",
+			"\"gameMode\":{},\"boardLevel\":{},\"finishedAdventure\":{},\"firstTime\":{},"
+			"\"draws\":{},\"updates\":{},\"sleeps\":{}",
 			static_cast<int>(aBoard->mTutorialState),
 			(aBoard->mCutScene != nullptr && aBoard->mCutScene->mSeedChoosing) ? "true" : "false",
 			aBoard->mBoardUpdateCounter,
@@ -337,7 +338,10 @@ std::string PvzFacade::DiagnosticsJson()
 			static_cast<int>(app_->mGameMode),
 			aBoard->mLevel,
 			(app_->mPlayerInfo != nullptr) ? app_->mPlayerInfo->mFinishedAdventure : -1,
-			app_->IsFirstTimeAdventureMode() ? "true" : "false");
+			app_->IsFirstTimeAdventureMode() ? "true" : "false",
+			app_->mDrawCount,
+			app_->mUpdateCount,
+			app_->mSleepCount);
 	}
 	aOut += "}";
 	return aOut;

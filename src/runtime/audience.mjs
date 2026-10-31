@@ -1,22 +1,30 @@
 /**
- * Audience interaction Director.
+ * Audience interaction director.
  *
- * Votes are deduplicated by message id, one vote per viewer per poll, and a
- * closed poll can only ever produce a winner that was an offered option. The
- * resulting constraint is enforced again by policy, executor and the native
- * bridge — the model never gets to promise a challenge the engine cannot keep.
+ * Votes are deduplicated and bounded. Recent comments are exposed to the AI as
+ * untrusted audience context, never as instructions. Only validated poll
+ * challenges become hard constraints in the game policy and native bridge.
  */
 export class AudienceDirector {
-  constructor({now = () => Date.now(), dedupeLimit = 4096, questionLimit = 32, maxVoteOptions = 4} = {}) {
+  constructor({
+    now = () => Date.now(),
+    dedupeLimit = 4096,
+    questionLimit = 32,
+    messageLimit = 64,
+    maxVoteOptions = 4
+  } = {}) {
     this.now = now
     this.dedupeLimit = dedupeLimit
     this.questionLimit = questionLimit
+    this.messageLimit = messageLimit
     this.maxVoteOptions = maxVoteOptions
     this.poll = null
     this.messageIds = new Set()
     this.questions = []
+    this.messages = []
     this.activeBans = new Map()
     this.history = []
+    this.version = 0
   }
 
   open({id, options, durationMs = 12000, now = this.now()}) {
@@ -27,9 +35,18 @@ export class AudienceDirector {
     }
     for (const option of options) {
       if (!option?.id || !option?.label) throw new Error("bad_options")
-      if (option.challenge?.bannedPlants?.some((plant) => typeof plant !== "string")) throw new Error("bad_challenge")
+      if (option.challenge?.bannedPlants?.some((plant) => typeof plant !== "string")) {
+        throw new Error("bad_challenge")
+      }
     }
-    this.poll = {id, options: options.map((o) => ({...o})), endAt: now + durationMs, votes: new Map(), openedAt: now}
+    this.poll = {
+      id,
+      options: options.map((option) => ({...option})),
+      endAt: now + durationMs,
+      votes: new Map(),
+      openedAt: now
+    }
+    this.version += 1
     return this.summary()
   }
 
@@ -44,20 +61,29 @@ export class AudienceDirector {
       this.messageIds.delete(this.messageIds.values().next().value)
     }
 
-    const text = content.trim().slice(0, 120)
+    const text = content.trim().replace(/\s+/g, " ").slice(0, 120)
+    if (!text) return "ignored"
+
     const poll = this.poll
     if (poll && now < poll.endAt && /^[1-4]$/.test(text)) {
       const option = poll.options[Number(text) - 1]
       if (!option) return "ignored"
       if (poll.votes.has(userId)) return "already_voted"
       poll.votes.set(userId, option.id)
+      this.version += 1
       return "voted"
     }
+
+    if (this.messages.length < this.messageLimit) {
+      this.messages.push({text, at: now})
+      this.version += 1
+    }
+
     if (/^(鱼|大肥鱼)[：:,，]?/.test(text) && this.questions.length < this.questionLimit) {
-      this.questions.push({text: text.slice(0, 120), userId, at: now})
+      this.questions.push({text, userId, at: now})
       return "question"
     }
-    return "ignored"
+    return "message"
   }
 
   summary() {
@@ -72,7 +98,7 @@ export class AudienceDirector {
       options: poll.options.map((option) => ({
         id: option.id,
         label: option.label,
-        votes: votes.filter((v) => v === option.id).length
+        votes: votes.filter((vote) => vote === option.id).length
       }))
     }
   }
@@ -85,14 +111,16 @@ export class AudienceDirector {
     this.poll = null
     const ranked = [...result.options].sort((a, b) => b.votes - a.votes)
     const winnerId = result.total ? ranked[0].id : null
-    // A tie is not a mandate: fall back to the deterministic first option.
     const tied = result.total > 1 && ranked[0].votes === ranked[1].votes
     const effectiveWinner = tied ? definition.options[0].id : winnerId
-    const winnerOption = definition.options.find((o) => o.id === effectiveWinner) ?? null
+    const winnerOption = definition.options.find((option) => option.id === effectiveWinner) ?? null
 
     if (winnerOption?.challenge) {
       for (const plant of winnerOption.challenge.bannedPlants ?? []) {
-        this.activeBans.set(plant, {until: now + (winnerOption.challenge.durationMs ?? 60000), pollId: definition.id})
+        this.activeBans.set(plant, {
+          until: now + (winnerOption.challenge.durationMs ?? 60000),
+          pollId: definition.id
+        })
       }
     }
 
@@ -103,16 +131,32 @@ export class AudienceDirector {
       challenge: winnerOption?.challenge ?? null
     }
     this.history.push({...outcome, closedAt: now})
+    this.version += 1
     return outcome
   }
 
   challenge(now = this.now()) {
     const bannedPlants = []
+    let changed = false
     for (const [plant, ban] of this.activeBans) {
-      if (ban.until <= now) this.activeBans.delete(plant)
-      else bannedPlants.push(plant)
+      if (ban.until <= now) {
+        this.activeBans.delete(plant)
+        changed = true
+      } else {
+        bannedPlants.push(plant)
+      }
     }
+    if (changed) this.version += 1
     return {bannedPlants}
+  }
+
+  /** Non-destructive view; messages are acknowledged only after a model reply. */
+  peekMessages(limit = 8) {
+    return this.messages.slice(-limit).map((message) => ({...message}))
+  }
+
+  clearMessages() {
+    this.messages = []
   }
 
   takeQuestions(limit = 5) {

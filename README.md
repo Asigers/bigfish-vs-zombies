@@ -1,95 +1,71 @@
 # BigFish vs Zombies
 
-Mac-first autonomous **Plants vs. Zombies** streamer: BigFish (a Pi-powered on-air
-character) plays PvZ-Portable through a closed control loop while audience votes and
-challenges change real, verified gameplay.
+Mac-first autonomous **Plants vs. Zombies** livestream: BigFish is an LLM-driven
+on-air character playing PvZ-Portable while audience preferences and challenges
+can influence its strategy.
 
-**Status: the controller plays the real game.** With a purchased PvZ GOTY asset set
-on this Mac it boots PvZ-Portable, chooses seeds, plants, collects sun and advances
-levels without human input (levels 1–2 cleared end to end so far). See
-[docs/M0-STATUS.md](docs/M0-STATUS.md) for gate-by-gate evidence.
+## AI-first control model
 
-## What works today
+The live controller uses one persistent Pi session as BigFish's brain. It sees a
+bounded projection of the real game state and recent audience context, then
+proposes its own strategy and up to five tentative plant/shovel actions. The
+runtime executes only the first action, confirms it against a fresh engine
+snapshot, and asks the model to continue or revise the plan.
 
-| Layer | State | Evidence |
-|---|---|---|
-| Control loop, policy, executor, journal | working | 48 Node tests |
-| Native bridge protocol + HTTP server | working | 32 native checks |
-| PvZ-Portable facade (plant/sun/shovel/next level) | compiles against upstream headers | `scripts/native-check.sh` |
-| Simulated 10-level campaign, end to end | passes | `tests/campaign.test.mjs` |
-| Live2D avatar reacts to real game events | verified in browser + live bridge | `docs/LIVE2D.md` |
-| Real-game levels 1–2 (seed choice → win → next level) | cleared unattended | `docs/M0-STATUS.md` |
-| Real game on this Mac | **working**: boots, plays, clears levels | `docs/M0-STATUS.md` |
-| Live2D character layer (OBS browser source) | working, non-commercial model | `docs/LIVE2D.md` |
-| Douyin gateway, TTS, vote widgets | not implemented | `docs/ARCHITECTURE.md` |
+The model is not restricted to a precomputed top-12 candidate list.
+
+- **LLM decides:** economy, defence, lane priorities, plant selection/placement,
+  shovel/rebuild, multi-step plans and responses to audience challenges.
+- **Runtime automates:** expiring sun collection, opportunistic collection when
+  the model waits, menu/seed bootstrap and next-level progression.
+- **Runtime + native bridge enforce:** board bounds, occupancy, card ownership,
+  cooldown, sun balance, challenge bans, revision checks and at-most-once
+  execution.
+- **One Pi session** generates both strategy/actions and Chinese livestream
+  speech. The line associated with an action is published only after the action
+  is verified.
+- **HeuristicAgent** remains available as a deterministic fallback and for
+  offline simulation, not as the default live strategy.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the authority model and
+rolling-horizon control loop.
 
 ## Quick start
 
-```bash
-npm test                    # Node contract, executor, sim, campaign, bridge tests (50)
-npm run sim                 # offline 10-level campaign (virtual clock, no assets)
-npm run sim -- --seed=11    # deterministic scenario variant
+\`\`\`bash
+npm test
+npm run sim
 
-# Verify the bridge and compile it into PvZ-Portable (needs cmake + ninja + git):
-npm run test:native         # clones upstream at a pinned commit, patches, builds, tests
-
-npm run overlay:install -- --acknowledge-noncommercial   # Live2D model + runtime
-npm run overlay             # preview the character layer (browser/OBS)
-npm run live                # game controller + overlay on 45931
-```
-
-Run against a real game once assets exist:
-
-```bash
-# 1) bridge-enabled game binary from npm run test:native
-BIGFISH_BRIDGE_TOKEN="$(openssl rand -hex 24)" \
+# Real game: live defaults to Pi / LLM
+BIGFISH_BRIDGE_TOKEN="$(openssl rand -hex 24)" \\
   native/vendor/build/pvz-portable -resdir "/path/to/GOTY" &
-# 2) controller
-BIGFISH_BRIDGE_TOKEN="<same token>" \
-  node src/main.mjs --engine=bridge --agent=heuristic
-```
+BIGFISH_BRIDGE_TOKEN="<same token>" node src/main.mjs --engine=bridge
 
-`--agent=pi` swaps the deterministic strategy for the isolated, tool-free Pi
-sessions. See [docs/RUNBOOK.md](docs/RUNBOOK.md).
+# Explicit deterministic fallback (debugging only)
+node src/main.mjs --engine=bridge --agent=heuristic
+\`\`\`
 
-## Layout
+Configure the Pi provider/model with \`BIGFISH_PROVIDER\` and \`BIGFISH_MODEL\`
+when required by the installed Pi runtime.
 
-```
+## Repository layout
+
+\`\`\`
 src/
-  domain/        contract (snapshot/action/receipt), policy (legal actions), errors
-  runtime/       executor (at-most-once), orchestrator (control cycle),
-                 tick-loop, journal, audience
-  adapters/      bridge-client (native HTTP), simulated-game, pi-agent, douyin
-  agents/        heuristic offline strategy
-  main.mjs       entrypoint (sim | bridge, heuristic | pi)
-  overlay/       Live2D OBS surface: static page, SSE server, speech mapping
-overlay/         OBS browser source page + locally installed model (git-ignored)
-native/
-  Protocol.h     wire contract, issue codes, snapshot structs
-  BridgeCore     revisioning, command queue, idempotency (game-agnostic, unit-tested)
-  HttpServer     127.0.0.1-only HTTP/1.1 + bearer token
-  PvzFacade      PvZ-Portable implementation on the game thread
-  Module         two-line hook into LawnApp::UpdateFrames
-  patches/       version-pinned upstream patch
-tests/           contract, executor, sim, campaign, journal, bridge client, audience
+  domain/        snapshot/action/receipt contract and action validation
+  runtime/       executor, LLM-first orchestrator, tick loop, journal, audience
+  adapters/      bridge client, simulator, single-session Pi brain, Douyin
+  agents/        deterministic fallback strategy
+  main.mjs       entrypoint (sim | bridge, auto | pi | heuristic)
+  overlay/       Live2D OBS surface and speech feed
+native/          loopback HTTP bridge and PvZ-Portable game-thread facade
+tests/           contract, executor, sim, campaign, audience and overlay tests
 docs/            architecture, bridge protocol, M0 status, runbook
-```
-
-## Design rules
-
-1. The game engine is the only authority. The controller never mutates memory.
-2. A command is **at most once**. After a timeout the intent stays pending until a
-   fresh snapshot proves or disproves it; the old command id is never replayed.
-3. The model may only pick an index from an enumerated legal-action list; audience
-   constraints are re-enforced by policy, executor *and* the native bridge.
-4. Everything the model sees is a bounded, frozen projection. No future waves, no
-   filesystem, no raw chat as instructions.
-5. Every attempt is journaled with its command id, revision and outcome.
+\`\`\`
 
 ## Rights and assets
 
-This repository contains **no** PopCap/EA assets. PvZ-Portable (LGPL-3.0-or-later)
-requires `main.pak` and `properties/` from a legally purchased copy of PvZ GOTY.
-Douyin live-play approval for derivative game IP requires separate IP/regulatory
-clearance; owning the game files is not sufficient. Live2D art licensing must be
-cleared before monetized streaming.
+This repository contains no PopCap/EA assets. PvZ-Portable (LGPL-3.0-or-later)
+requires game assets from a legally purchased PvZ GOTY copy. Game-IP streaming
+approval and Live2D model licensing must be cleared separately before
+monetization.

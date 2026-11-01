@@ -67,17 +67,22 @@ seed-bank application.
 
 ## What is *not* proven yet
 
-1. **Ten consecutive real levels.** Levels 1–2 cleared; the soak run to level 10 is
-   the remaining acceptance step, and long sessions may expose new engine edges.
-2. **Shovel in the real game.** Implemented (`Plant::Die`) and unit-tested, not yet
+1. **Live model-selected deck.** The chooser snapshot, LLM deck decision and
+   ordered seed-bank application pass CI but have not been exercised in the real
+   game with Pi credentials. Verify the normal adventure chooser and a Survival
+   repick, including the visible card order.
+2. **Ten consecutive real levels.** Levels 1–2 cleared before this refactor; the
+   soak run to level 10 remains pending, and long sessions may expose new engine
+   edges.
+3. **Shovel in the real game.** Implemented (`Plant::Die`) and unit-tested, not yet
    exercised live.
-3. **Engine save/restart.** `Board::SaveGame`/`LoadGame` (`.v4`) is untouched; the
+4. **Engine save/restart.** `Board::SaveGame`/`LoadGame` (`.v4`) is untouched; the
    controller has journal recovery (`tests/journal.test.mjs`), the engine path is
    not covered. A stale auto-save from an interrupted session is intentionally
    ignored at bootstrap.
-4. **Sun lifetime units.** The facade reports `(GetDisappearTime - counter) * 10 ms`;
+5. **Sun lifetime units.** The facade reports `(GetDisappearTime - counter) * 10 ms`;
    it matches observed behaviour (~7.5 s) but the tick length is an assumption.
-5. **Non-adventure modes** (pool/roof/night, conveyor levels, mini-games) are
+6. **Non-adventure modes** (pool/roof/night, conveyor levels, mini-games) are
    untested; the facade assumes the day-lawn grid.
 
 ## Blockers and owners
@@ -90,11 +95,13 @@ seed-bank application.
 
 ## Next increments (in order)
 
-1. Finish the 10-level soak and record the snapshot stream as a fixture.
-2. Replay that fixture against the controller so real-game regressions are testable
+1. Run the live model-selected deck smoke test: normal chooser, visible ordered
+   seed bank, then a Survival repick; preserve the journal and snapshots.
+2. Finish the 10-level soak and record the snapshot stream as a fixture.
+3. Replay that fixture against the controller so real-game regressions are testable
    without assets.
-3. Cover shovel and engine save/restart with scripted scenarios.
-4. Only then claim M0, and move to the M1 gateway.
+4. Cover shovel and engine save/restart with scripted scenarios.
+5. Only then claim M0, and move to the M1 gateway.
 
 ## Rights
 

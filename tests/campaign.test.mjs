@@ -234,3 +234,51 @@ test("runtime never invents a default deck when the agent cannot choose one", as
   assert.equal(sim.snapshot().cards.length, 0)
   assert.equal(executor.pending, null)
 })
+
+test("the model chooses a fresh ordered deck for every level and receives deck history", async () => {
+  const fallback = new HeuristicAgent()
+  const decks = [
+    ["sunflower", "peashooter", "wallnut", "snowpea"],
+    ["sunflower", "snowpea", "wallnut", "peashooter"]
+  ]
+  const selections = []
+  const agent = {
+    async selectDeck({seedChooser, context}) {
+      const index = selections.length
+      selections.push({
+        slots: seedChooser.slots,
+        previousDeck: [...context.previousDeck],
+        deckHistory: context.deckHistory.map((entry) => ({
+          level: entry.level,
+          deck: [...entry.deck],
+          strategy: entry.strategy
+        }))
+      })
+      return {
+        plants: decks[index],
+        strategy: "level-" + (index + 1),
+        speech: ""
+      }
+    },
+    async decide(args) {
+      return fallback.decide(args)
+    }
+  }
+  const {orchestrator, run} = harness({
+    levels: 2,
+    agent,
+    startInIntro: true,
+    seedSlots: 4
+  })
+  await run(12_000)
+
+  assert.equal(orchestrator.finished.reason, "campaign_complete")
+  assert.equal(selections.length, 2, "each real chooser must invoke model deck selection")
+  assert.equal(selections[0].slots, 4)
+  assert.deepEqual(selections[0].previousDeck, [])
+  assert.deepEqual(selections[1].previousDeck, decks[0])
+  assert.deepEqual(selections[1].deckHistory, [
+    {level: 1, deck: decks[0], strategy: "level-1"}
+  ])
+  assert.deepEqual(orchestrator.summary().deckHistory.map((entry) => entry.deck), decks)
+})

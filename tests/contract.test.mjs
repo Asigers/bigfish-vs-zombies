@@ -181,6 +181,12 @@ test("seed chooser validation enforces slots, unlocks, dependencies and mandator
     revision: 1
   }
   assert.equal(validateAction(chooser, deck), null)
+  for (const status of [STATUS.PLAYING, STATUS.PAUSED]) {
+    const repick = snapshot({status, cards: [], seedChooser: chooser})
+    assert.equal(validateAction(repick, {
+      ...deck, gameId: repick.gameId, revision: repick.revision
+    }), null, `active chooser remains actionable while ${status}`)
+  }
   assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "gatlingpea"]}), ISSUE.INVALID_SEED_SELECTION)
   assert.equal(validateAction(chooser, {...deck, plants: ["peashooter", "repeater"]}), ISSUE.INVALID_SEED_SELECTION)
   assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "sunflower"]}), ISSUE.INVALID_SEED_SELECTION)

@@ -156,6 +156,12 @@ work before the model is asked to choose. Imitater remains excluded.
 - `.state/journal.jsonl` — append-only audit: every `sent`, `acknowledged`,
   `verified`, `rejected`, `ambiguous`, `abandoned` with command id, revision and
   action. `ts` is wall-clock, pinning a record to a live moment.
+- `deck_selected` — the model's ordered plant IDs and strategy; this is a proposal,
+  not proof that the game applied it.
+- `deck_verified` — the fresh engine snapshot confirms the same ordered bank and
+  the chooser has closed. This is the success signal for the live deck smoke test.
+- `invalid_deck`, `deck_selection_error` and `command_rejected` explain why a
+  proposed deck could not be applied; inspect the adjacent issue/message fields.
 - Final JSON summary on stdout: per-level timings, command counts, ambiguity counts.
 - `pendingFromJournal()` recovers the last unresolved intent after a crash, so a
   restart resumes rather than replays.

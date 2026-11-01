@@ -17,10 +17,11 @@ choosing from a small menu.
 - **Runtime automates:** expiring/opportunistic sun collection, menu entry,
   chooser-free intro transitions and next-level progression. It never invents a
   default deck or places emergency plants.
-- **Runtime + native bridge enforce:** current game revision, slot count,
-  unlocked/allowed plants, mandatory tutorial picks, upgrade dependencies,
-  challenge bans, board bounds, occupancy, cooldown, sun balance and at-most-once
-  execution.
+- **Runtime enforces:** model-output validity and audience challenge bans
+  before submitting an action.
+- **Native bridge enforces:** revision semantics, chooser readiness and slot count,
+  unlocked/allowed plants, mandatory tutorial picks, upgrade dependencies, board
+  bounds, occupancy, cooldown, sun balance and at-most-once execution.
 - **One Pi session** produces deck decisions, gameplay decisions and speech.
   Speech associated with an action is published only after the action is
   verified.

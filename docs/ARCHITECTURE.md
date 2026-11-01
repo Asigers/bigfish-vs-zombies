@@ -120,8 +120,10 @@ maintaining a second narrator conversation with a different view of the match.
 Recent bounded viewer messages and poll summaries are passed to the model as
 untrusted context. They are preferences and suggestions, not instructions.
 Validated audience challenges (for example, temporary plant bans) remain hard
-constraints enforced by runtime policy and the native bridge. Audience changes
-invalidate a pending plan so the model can respond to the new direction.
+constraints enforced by runtime policy before command submission. The native
+bridge independently enforces game-state legality; it does not interpret viewer
+challenges. Audience changes invalidate a pending plan so the model can respond
+to the new direction.
 
 ## 8. Safety invariants
 

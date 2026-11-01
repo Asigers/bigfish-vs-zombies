@@ -12,7 +12,7 @@ Legend: ✅ verified · 🟡 implemented, not runtime-verified · ⛔ blocked.
 | 1 | Build PvZ-Portable on this Apple Silicon Mac | ✅ | upstream `4585876` builds with clang 17 / Ninja; `pvz-portable` is a 3.7 MB arm64 Mach-O |
 | 2 | Run it with legally sourced GOTY assets | ✅ | Steam GOTY 1.2.0.1096 assets load (`Resource Loading Time ~1.2s`), title screen and level 1 render |
 | 3 | Embed a game-thread bridge with revisioned snapshots | ✅ | bridge serves `health`/`snapshot`/`command` from the live game; snapshots track sun, plants, zombies, cards, cutscene state |
-| 4 | Model-selected seed deck and game actions | 🟡 | LLM deck selection, chooser metadata and native validation are implemented in this refactor; this new path still needs native build and live-game verification |
+| 4 | Model-selected seed deck and game actions | 🟡 | Controller CI passes 68/68 tests; native bridge tests pass and the pinned PvZ-Portable target compiles in CI; model-selected decks still need live-game verification |
 | 5 | Never retry ambiguously acknowledged actions; reconcile with next snapshot | ✅ | `tests/executor.test.mjs` (timeout → ambiguous → verified / abandoned, one wire call), `native/tests/core_test.cpp` (duplicate id never re-applies), live journal shows 0 ambiguous / 0 abandoned across 226+ commands |
 | 6 | Pass ≥ 10 levels plus restart/save tests on the Mac | 🟡 | real game: levels **1 and 2 cleared** end-to-end (seed choice → play → next level); 10-level soak + engine save/restart still pending |
 
@@ -47,24 +47,23 @@ fixed on the way:
 - the intro cutscene is frozen while Crazy Dave holds a dialog line; the facade
   now advances/ends it exactly like a click.
 
-## What was proven before the current refactor
+## Current refactor CI evidence (2026-11-01)
 
-The baseline branch previously passed its controller and native test suites.
-The current seed-deck changes add new tests and a native facade extension; those
-new checks must run before this refactor can be considered verified.
+GitHub Actions passed both jobs on commit
+`c5c451c798fccf07c68e3a066950deb9206bbf99`:
 
-- Ten deterministic simulated levels complete with zero rejected commands, zero
-  abandoned intents, no command-id reuse, and every journaled command resolved
-  exactly once.
-- The previous native bridge compiled against real upstream headers. The changed
-  seed-chooser facade still needs to be rebuilt against the pinned upstream commit.
-- The bridge's existing protocol, idempotency and revision rules were exercised
-  natively over a real loopback socket.
+- **Controller:** `npm test` passed all 68 tests, including the deterministic
+  campaign, model-selected deck validation, rejection/retry and speech tests.
+- **Native:** bridge protocol/idempotency tests passed and the
+  `pvz-portable` target compiled against the pinned upstream source and headers.
+
+This proves the controller suite and native build are green. The CI runner has no
+game assets and cannot prove that a live game exposes the chooser correctly or
+that the model-selected ordered deck appears in the real seed bank.
 
 The existing level 1–2 live evidence predates the current model-selected seed-deck
 refactor. It does not validate the new chooser snapshot, deck selection or ordered
-seed-bank application. A GitHub Actions workflow has been added to run the updated
-controller and native build/test suites after the changes are committed.
+seed-bank application.
 
 ## What is *not* proven yet
 

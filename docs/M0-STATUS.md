@@ -12,7 +12,7 @@ Legend: ✅ verified · 🟡 implemented, not runtime-verified · ⛔ blocked.
 | 1 | Build PvZ-Portable on this Apple Silicon Mac | ✅ | upstream `4585876` builds with clang 17 / Ninja; `pvz-portable` is a 3.7 MB arm64 Mach-O |
 | 2 | Run it with legally sourced GOTY assets | ✅ | Steam GOTY 1.2.0.1096 assets load (`Resource Loading Time ~1.2s`), title screen and level 1 render |
 | 3 | Embed a game-thread bridge with revisioned snapshots | ✅ | bridge serves `health`/`snapshot`/`command` from the live game; snapshots track sun, plants, zombies, cards, cutscene state |
-| 4 | Model-selected seed deck and game actions | 🟡 | Controller CI passes 68/68 tests; native bridge tests pass and the pinned PvZ-Portable target compiles in CI; model-selected decks still need live-game verification |
+| 4 | Model-selected seed deck and game actions | 🟡 | Controller CI passes 69/69 tests; native bridge tests pass and the pinned PvZ-Portable target compiles in CI; model-selected decks still need live-game verification |
 | 5 | Never retry ambiguously acknowledged actions; reconcile with next snapshot | ✅ | `tests/executor.test.mjs` (timeout → ambiguous → verified / abandoned, one wire call), `native/tests/core_test.cpp` (duplicate id never re-applies), live journal shows 0 ambiguous / 0 abandoned across 226+ commands |
 | 6 | Pass ≥ 10 levels plus restart/save tests on the Mac | 🟡 | real game: levels **1 and 2 cleared** end-to-end (seed choice → play → next level); 10-level soak + engine save/restart still pending |
 
@@ -50,10 +50,10 @@ fixed on the way:
 ## Current refactor CI evidence (2026-11-01)
 
 GitHub Actions passed both jobs on commit
-`c5c451c798fccf07c68e3a066950deb9206bbf99`:
+`bc4ddd650b37ef6f6c8520f4d6afe46fc981940a`:
 
-- **Controller:** `npm test` passed all 68 tests, including the deterministic
-  campaign, model-selected deck validation, rejection/retry and speech tests.
+- **Controller:** `npm test` passed all 69 tests, including the deterministic
+  campaign, model-selected deck validation, per-level deck history, Survival repicks, rejection/retry and speech tests.
 - **Native:** bridge protocol/idempotency tests passed and the
   `pvz-portable` target compiled against the pinned upstream source and headers.
 

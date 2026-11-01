@@ -187,7 +187,16 @@ export class Orchestrator {
       this.#emit("snapshot", {revision: snapshot.revision, relation})
     }
     if (this.rejections.revision !== snapshot.revision) {
+      const hadRejectedActions = this.rejections.keys.size > 0
       this.rejections = {revision: snapshot.revision, keys: new Set()}
+      // A rejection only suppresses an identical action while the observed
+      // world is unchanged. Once the engine advances, let the model reassess
+      // immediately instead of inheriting the old retry backoff.
+      if (hadRejectedActions) {
+        this.nextAgentAttemptAt = 0
+        this.lastPlanError = null
+        this.lastDeckError = null
+      }
     }
     this.previous = snapshot
     this.snapshot = snapshot

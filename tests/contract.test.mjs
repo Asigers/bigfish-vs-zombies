@@ -73,7 +73,7 @@ test("actions are validated against the observed state", () => {
 test("menu and seed-chooser have exactly one legal bootstrap action", () => {
   const menu = snapshot({status: STATUS.MENU})
   assert.deepEqual(candidates(menu).map((a) => a.type), [ACTION.ENTER_ADVENTURE])
-  assert.equal(validateAction(menu, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+  assert.equal(validateAction(menu, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NO_SEED_CHOOSER)
   assert.equal(validateAction(menu, {type: ACTION.NEXT_LEVEL, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
 
   const intro = snapshot({status: STATUS.INTRO})
@@ -82,7 +82,7 @@ test("menu and seed-chooser have exactly one legal bootstrap action", () => {
 
   const playing = snapshot()
   assert.equal(validateAction(playing, {type: ACTION.ENTER_ADVENTURE, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
-  assert.equal(validateAction(playing, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+  assert.equal(validateAction(playing, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NO_SEED_CHOOSER)
 })
 
 test("next_level is only legal after a win", () => {

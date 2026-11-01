@@ -65,8 +65,9 @@ export class AudienceDirector {
     if (!text) return "ignored"
 
     const poll = this.poll
-    if (poll && now < poll.endAt && /^[1-4]$/.test(text)) {
-      const option = poll.options[Number(text) - 1]
+    if (poll && now < poll.endAt && /^\d+$/.test(text)) {
+      const optionIndex = Number(text) - 1
+      const option = Number.isSafeInteger(optionIndex) ? poll.options[optionIndex] : null
       if (!option) return "ignored"
       if (poll.votes.has(userId)) return "already_voted"
       poll.votes.set(userId, option.id)

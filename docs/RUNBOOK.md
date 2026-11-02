@@ -4,7 +4,7 @@
 
 ```bash
 npm install            # only dependency: the Pi SDK
-npm test               # 48 tests
+npm test               # controller unit and integration tests
 npm run sim            # deterministic 10-level campaign on the simulator
 npm run sim -- --seed=11 --quiet
 ```
@@ -101,10 +101,11 @@ curl -s -H "Authorization: Bearer $BIGFISH_BRIDGE_TOKEN" \
 
 # 3) controller
 BIGFISH_BRIDGE_TOKEN="$BIGFISH_BRIDGE_TOKEN" \
-  node src/main.mjs --engine=bridge --agent=heuristic --levels=10
+  node src/main.mjs --engine=bridge --levels=10
 ```
 
-With an LLM tactical host:
+The live bridge defaults to Pi / LLM. To select the deterministic fallback explicitly,
+pass --agent=heuristic. To configure the Pi model explicitly:
 
 ```bash
 BIGFISH_PROVIDER=anthropic BIGFISH_MODEL=claude-… \
@@ -112,18 +113,19 @@ BIGFISH_BRIDGE_TOKEN="$BIGFISH_BRIDGE_TOKEN" \
   node src/main.mjs --engine=bridge --agent=pi
 ```
 
-The Pi sessions have no tools and use only the projected snapshot. If the model
-fails or times out, the loop keeps playing with the deterministic strategy rules
-plus emergency defence; it never blocks the game.
+The Pi session has no tools and uses only the projected snapshot plus the live
+seed-chooser options. If the model fails or times out, the controller waits and
+retries; it does not substitute a default deck or emergency plant strategy.
 
-### What the controller handles by itself (verified live)
+### Expected controller behavior (re-verify after the seed-deck refactor)
 
 - Title screen → `enter_adventure`: creates a `BigFish` profile if none exists,
   marks it as a returning player (skips the scripted tutorial that freezes waves),
   and builds the board.
-- Seed chooser → `choose_seeds`: clicks Crazy Dave's dialog to completion, fills the
-  bank deterministically (sunflower, peashooter, wallnut, snowpea, repeater, …) and
-  closes the chooser.
+- Seed chooser → `choose_seeds`: the same Pi session chooses the complete ordered
+deck from the engine-reported unlocked plants, slot count, warnings, mandatory
+picks and upgrade dependencies. Crazy Dave dialogue is dismissed as lifecycle
+work before the model is asked to choose. Imitater remains excluded.
 - Level win → `next_level`: advances the profile and starts the next board, which
   loops back into the seed chooser.
 
@@ -154,6 +156,12 @@ plus emergency defence; it never blocks the game.
 - `.state/journal.jsonl` — append-only audit: every `sent`, `acknowledged`,
   `verified`, `rejected`, `ambiguous`, `abandoned` with command id, revision and
   action. `ts` is wall-clock, pinning a record to a live moment.
+- `deck_selected` — the model's ordered plant IDs and strategy; this is a proposal,
+  not proof that the game applied it.
+- `deck_verified` — the fresh engine snapshot confirms the same ordered bank and
+  the chooser has closed. This is the success signal for the live deck smoke test.
+- `invalid_deck`, `deck_selection_error` and `command_rejected` explain why a
+  proposed deck could not be applied; inspect the adjacent issue/message fields.
 - Final JSON summary on stdout: per-level timings, command counts, ambiguity counts.
 - `pendingFromJournal()` recovers the last unresolved intent after a crash, so a
   restart resumes rather than replays.

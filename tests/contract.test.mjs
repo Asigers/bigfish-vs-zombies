@@ -73,7 +73,7 @@ test("actions are validated against the observed state", () => {
 test("menu and seed-chooser have exactly one legal bootstrap action", () => {
   const menu = snapshot({status: STATUS.MENU})
   assert.deepEqual(candidates(menu).map((a) => a.type), [ACTION.ENTER_ADVENTURE])
-  assert.equal(validateAction(menu, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+  assert.equal(validateAction(menu, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NO_SEED_CHOOSER)
   assert.equal(validateAction(menu, {type: ACTION.NEXT_LEVEL, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
 
   const intro = snapshot({status: STATUS.INTRO})
@@ -82,7 +82,7 @@ test("menu and seed-chooser have exactly one legal bootstrap action", () => {
 
   const playing = snapshot()
   assert.equal(validateAction(playing, {type: ACTION.ENTER_ADVENTURE, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
-  assert.equal(validateAction(playing, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NOT_PLAYING)
+  assert.equal(validateAction(playing, {type: ACTION.CHOOSE_SEEDS, gameId: "g1", revision: 1}), ISSUE.NO_SEED_CHOOSER)
 })
 
 test("next_level is only legal after a win", () => {
@@ -154,4 +154,60 @@ test("conveyor banks hand out free seeds", () => {
   assert.ok(candidates(conveyor).some((a) => a.type === ACTION.PLANT))
   const paid = snapshot({sun: 0, cards: [{type: "wallnut", cost: 50, ready: true}]})
   assert.equal(validateAction(paid, {type: ACTION.PLANT, plant: "wallnut", row: 1, col: 1, gameId: "g1", revision: 1}), ISSUE.INSUFFICIENT_SUN)
+})
+
+test("seed chooser validation enforces slots, unlocks, dependencies and mandatory picks", () => {
+  const chooser = snapshot({
+    status: STATUS.INTRO,
+    cards: [],
+    seedChooser: {
+      active: true,
+      ready: true,
+      slots: 2,
+      availablePlants: [
+        {type: "sunflower", cost: 50, recommended: true, warnings: [], requirements: []},
+        {type: "peashooter", cost: 100, recommended: true, warnings: [], requirements: []},
+        {type: "repeater", cost: 200, recommended: true, warnings: [], requirements: []},
+        {type: "gatlingpea", cost: 250, recommended: false, warnings: [], requirements: ["repeater"]}
+      ],
+      preselected: ["sunflower"],
+      required: ["sunflower"]
+    }
+  })
+  const deck = {
+    type: ACTION.CHOOSE_SEEDS,
+    plants: ["sunflower", "peashooter"],
+    gameId: "g1",
+    revision: 1
+  }
+  assert.equal(validateAction(chooser, deck), null)
+  for (const status of [STATUS.PLAYING, STATUS.PAUSED]) {
+    const repick = snapshot({status, cards: [], seedChooser: chooser.seedChooser})
+    assert.equal(validateAction(repick, {
+      ...deck, gameId: repick.gameId, revision: repick.revision
+    }), null, `active chooser remains actionable while ${status}`)
+  }
+  assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "gatlingpea"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, {...deck, plants: ["peashooter", "repeater"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "sunflower"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, {...deck, plants: ["sunflower", "unknown"]}), ISSUE.INVALID_SEED_SELECTION)
+  assert.equal(validateAction(chooser, deck, {bannedPlants: ["peashooter"]}), ISSUE.CHALLENGE_BAN)
+
+  const waiting = snapshot({
+    status: STATUS.INTRO,
+    cards: [],
+    seedChooser: {
+      active: true, ready: false, slots: 2,
+      availablePlants: [
+        {type: "sunflower", cost: 50, recommended: true, warnings: [], requirements: []},
+        {type: "peashooter", cost: 100, recommended: true, warnings: [], requirements: []}
+      ],
+      preselected: [], required: []
+    }
+  })
+  assert.equal(validateAction(waiting, deck), ISSUE.SEED_CHOOSER_NOT_READY)
+
+  const chooserFree = snapshot({status: STATUS.INTRO, cards: []})
+  assert.equal(validateAction(chooserFree, {...deck, plants: []}), null)
+  assert.equal(validateAction(chooserFree, deck), ISSUE.NO_SEED_CHOOSER)
 })

@@ -1,0 +1,32 @@
+name: checks
+
+on:
+  push:
+    branches:
+      - main
+      - "refactor/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  controller:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run controller tests
+        run: npm test
+
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libjpeg-dev libopenmpt-dev libpng-dev libsdl2-dev libgl1-mesa-dev
+      - name: Build bridge core, run native tests and compile PvZ facade
+        run: npm run test:native

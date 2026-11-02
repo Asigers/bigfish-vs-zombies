@@ -28,7 +28,7 @@ public:
 	virtual Issue EnterAdventure() = 0;
 
 	/** Fill the seed bank from whatever the level offers and close the chooser. */
-	virtual Issue ChooseSeeds() = 0;
+	virtual Issue ChooseSeeds(const std::vector<std::string>& thePlants) = 0;
 
 	/**
 	 * Optional JSON with engine-internal counters for debugging a stuck board.

@@ -33,8 +33,54 @@ std::string SerializeSnapshot(const Snapshot& theSnapshot)
 		 << ",\"columns\":" << theSnapshot.columns
 		 << ",\"status\":\"" << StatusName(theSnapshot.status) << "\""
 		 << ",\"hasNextLevel\":" << (theSnapshot.hasNextLevel ? "true" : "false")
-		 << ",\"freeSeeds\":" << (theSnapshot.freeSeeds ? "true" : "false")
-		 << ",\"blocked\":[]";
+		 << ",\"freeSeeds\":" << (theSnapshot.freeSeeds ? "true" : "false");
+	if (theSnapshot.seedChooser.active)
+	{
+		const auto& aChooser = theSnapshot.seedChooser;
+		aOut << ",\"seedChooser\":{\"active\":true"
+			 << ",\"ready\":" << (aChooser.ready ? "true" : "false")
+			 << ",\"slots\":" << aChooser.slots
+			 << ",\"availablePlants\":[";
+		for (std::size_t i = 0; i < aChooser.availablePlants.size(); ++i)
+		{
+			const auto& aOption = aChooser.availablePlants[i];
+			if (i) aOut << ',';
+			aOut << "{\"type\":\"" << JsonEscape(aOption.type) << "\""
+				 << ",\"cost\":" << aOption.cost
+				 << ",\"recommended\":" << (aOption.recommended ? "true" : "false")
+				 << ",\"warnings\":[";
+			for (std::size_t j = 0; j < aOption.warnings.size(); ++j)
+			{
+				if (j) aOut << ',';
+				aOut << "\"" << JsonEscape(aOption.warnings[j]) << "\"";
+			}
+			aOut << "],\"requirements\":[";
+			for (std::size_t j = 0; j < aOption.requirements.size(); ++j)
+			{
+				if (j) aOut << ',';
+				aOut << "\"" << JsonEscape(aOption.requirements[j]) << "\"";
+			}
+			aOut << "]}";
+		}
+		aOut << "],\"preselected\":[";
+		for (std::size_t i = 0; i < aChooser.preselected.size(); ++i)
+		{
+			if (i) aOut << ',';
+			aOut << "\"" << JsonEscape(aChooser.preselected[i]) << "\"";
+		}
+		aOut << "],\"required\":[";
+		for (std::size_t i = 0; i < aChooser.required.size(); ++i)
+		{
+			if (i) aOut << ',';
+			aOut << "\"" << JsonEscape(aChooser.required[i]) << "\"";
+		}
+		aOut << "]}";
+	}
+	else
+	{
+		aOut << ",\"seedChooser\":null";
+	}
+	aOut << ",\"blocked\":[]";
 
 	aOut << ",\"plants\":[";
 	for (std::size_t i = 0; i < theSnapshot.plants.size(); ++i)
@@ -147,6 +193,8 @@ const char* IssueName(Issue theIssue)
 	case Issue::SunMissing: return "sun_missing";
 	case Issue::NoNextLevel: return "no_next_level";
 	case Issue::NoSeedChooser: return "no_seed_chooser";
+	case Issue::SeedChooserNotReady: return "seed_chooser_not_ready";
+	case Issue::InvalidSeedSelection: return "invalid_seed_selection";
 	case Issue::NoEffect: return "no_effect";
 	case Issue::DuplicateCommand: return "duplicate_command";
 	}
@@ -165,12 +213,26 @@ bool SameState(const Snapshot& theLeft, const Snapshot& theRight)
 		theLeft.status != theRight.status ||
 		theLeft.hasNextLevel != theRight.hasNextLevel ||
 		theLeft.freeSeeds != theRight.freeSeeds ||
+		theLeft.seedChooser.active != theRight.seedChooser.active ||
+		theLeft.seedChooser.ready != theRight.seedChooser.ready ||
+		theLeft.seedChooser.slots != theRight.seedChooser.slots ||
+		theLeft.seedChooser.availablePlants.size() != theRight.seedChooser.availablePlants.size() ||
+		theLeft.seedChooser.preselected != theRight.seedChooser.preselected ||
+		theLeft.seedChooser.required != theRight.seedChooser.required ||
 		theLeft.plants.size() != theRight.plants.size() ||
 		theLeft.zombies.size() != theRight.zombies.size() ||
 		theLeft.cards.size() != theRight.cards.size() ||
 		theLeft.suns.size() != theRight.suns.size())
 	{
 		return false;
+	}
+	for (std::size_t i = 0; i < theLeft.seedChooser.availablePlants.size(); ++i)
+	{
+		const auto& a = theLeft.seedChooser.availablePlants[i];
+		const auto& b = theRight.seedChooser.availablePlants[i];
+		if (a.type != b.type || a.cost != b.cost || a.recommended != b.recommended ||
+			a.warnings != b.warnings || a.requirements != b.requirements)
+			return false;
 	}
 	for (std::size_t i = 0; i < theLeft.plants.size(); ++i)
 	{
@@ -241,10 +303,72 @@ Receipt BridgeCore::Validate(const Snapshot& theSnapshot, const Command& theComm
 	}
 	if (aAction.type == kActionChooseSeeds)
 	{
-		if (theSnapshot.status != Status::Intro)
+		const auto& aChooser = theSnapshot.seedChooser;
+		if (!aChooser.active)
+		{
+			if (theSnapshot.status != Status::Intro || !aAction.plants.empty())
+			{
+				aReceipt.issue = Issue::NoSeedChooser;
+				return aReceipt;
+			}
+			aReceipt.issue = Issue::None;
+			aReceipt.status = "applied";
+			return aReceipt;
+		}
+		if (theSnapshot.status != Status::Intro && theSnapshot.status != Status::Playing &&
+			theSnapshot.status != Status::Paused)
 		{
 			aReceipt.issue = Issue::NotPlaying;
 			return aReceipt;
+		}
+		if (!aChooser.ready)
+		{
+			aReceipt.issue = Issue::SeedChooserNotReady;
+			return aReceipt;
+		}
+		if (static_cast<int>(aAction.plants.size()) != aChooser.slots)
+		{
+			aReceipt.issue = Issue::InvalidSeedSelection;
+			return aReceipt;
+		}
+		std::vector<std::string> aSelected;
+		for (const auto& aPlant : aAction.plants)
+		{
+			if (aPlant.empty() || aPlant.size() > 32 ||
+				std::find(aSelected.begin(), aSelected.end(), aPlant) != aSelected.end())
+			{
+				aReceipt.issue = Issue::InvalidSeedSelection;
+				return aReceipt;
+			}
+			const auto aOption = std::find_if(aChooser.availablePlants.begin(), aChooser.availablePlants.end(),
+				[&](const SeedOptionView& theOption) { return theOption.type == aPlant; });
+			if (aOption == aChooser.availablePlants.end())
+			{
+				aReceipt.issue = Issue::InvalidSeedSelection;
+				return aReceipt;
+			}
+			aSelected.push_back(aPlant);
+		}
+		for (const auto& aRequired : aChooser.required)
+		{
+			if (std::find(aSelected.begin(), aSelected.end(), aRequired) == aSelected.end())
+			{
+				aReceipt.issue = Issue::InvalidSeedSelection;
+				return aReceipt;
+			}
+		}
+		for (const auto& aPlant : aSelected)
+		{
+			const auto aOption = std::find_if(aChooser.availablePlants.begin(), aChooser.availablePlants.end(),
+				[&](const SeedOptionView& theOption) { return theOption.type == aPlant; });
+			for (const auto& aRequired : aOption->requirements)
+			{
+				if (std::find(aSelected.begin(), aSelected.end(), aRequired) == aSelected.end())
+				{
+					aReceipt.issue = Issue::InvalidSeedSelection;
+					return aReceipt;
+				}
+			}
 		}
 		aReceipt.issue = Issue::None;
 		aReceipt.status = "applied";
@@ -365,7 +489,7 @@ Receipt BridgeCore::Execute(const Snapshot& theSnapshot, const Command& theComma
 	else if (aAction.type == kActionEnterAdventure)
 		aIssue = facade_.EnterAdventure();
 	else if (aAction.type == kActionChooseSeeds)
-		aIssue = facade_.ChooseSeeds();
+		aIssue = facade_.ChooseSeeds(aAction.plants);
 
 	aReceipt.revisionBefore = theSnapshot.revision;
 	aReceipt.revisionAfter = theSnapshot.revision;
@@ -566,6 +690,27 @@ std::string BridgeCore::CommandEnvelope(std::string_view theBody, int& theHttpSt
 		{
 			theHttpStatus = 400;
 			return "{\"error\":\"bad_action\"}";
+		}
+	}
+	if (aCommand.action.type == kActionChooseSeeds)
+	{
+		const JsonValue* aPlants = aAction->Get("plants");
+		if (aPlants != nullptr)
+		{
+			if (!aPlants->IsArray() || aPlants->array.size() > 10)
+			{
+				theHttpStatus = 400;
+				return "{\"error\":\"bad_action\"}";
+			}
+			for (const auto& aPlant : aPlants->array)
+			{
+				if (!aPlant.IsString() || aPlant.text.empty() || aPlant.text.size() > 32)
+				{
+					theHttpStatus = 400;
+					return "{\"error\":\"bad_action\"}";
+				}
+				aCommand.action.plants.push_back(aPlant.text);
+			}
 		}
 	}
 	if (aCommand.action.type == kActionPlant || aCommand.action.type == kActionShovel)

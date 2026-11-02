@@ -1,139 +1,162 @@
 # Architecture
 
-Status: control layer implemented and tested; native bridge implemented and
-compiled into PvZ-Portable; real-game acceptance blocked (see M0-STATUS.md).
+Status: LLM-first autonomous controller. The native bridge, snapshot contract,
+command journal and at-most-once executor remain the trusted game-control
+boundary.
 
-## 1. Layers
+## 1. Authority model
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ presentation (not built yet)                                 │
-│   OBS scene, Live2D overlay, TTS, vote widget                │
-└───────────────▲──────────────────────────────────────────────┘
-                │ events: narration, vote, command_verified
-┌───────────────┴──────────────────────────────────────────────┐
-│ controller (Node 22)                                          │
-│                                                               │
-│  Orchestrator ── one bounded cycle ──────────────────────┐    │
-│   1 read snapshot (retryable, bounded)                   │    │
-│   2 reconcile pending command against fresh state        │    │
-│   3 terminal states: lost / won / level advance          │    │
-│   4 urgent sun → emergency defence → agent → bank sun    │    │
-│                                                          │    │
-│  ActionExecutor: single-flight, at-most-once, verified   │    │
-│  Policy: legal action enumeration, scoring, validation   │    │
-│  Journal: append-only JSONL audit + restart recovery     │    │
-│  AudienceDirector: polls, dedupe, challenges             │    │
-└───────────────▲──────────────────────────────────────────────┘
-                │ HTTP/1.1 on 127.0.0.1, bearer token
-┌───────────────┴──────────────────────────────────────────────┐
-│ native bridge (inside the game process)                      │
-│  HttpServer  ─ parse, authenticate, enqueue, wait            │
-│  BridgeCore  ─ revision, dedupe by commandId, receipts,      │
-│                at most ONE command per game frame            │
-│  PvzFacade   ─ Capture() + engine calls on the game thread   │
-│  hook        ─ bigfish::PumpBridge(this) in UpdateFrames()   │
-└───────────────▲──────────────────────────────────────────────┘
-                │ in-process calls only
-        PvZ-Portable (engine, renderer, collision, waves, saves)
-```
+BigFish is an LLM-driven livestream character, not a scripted strategy with an
+LLM choosing from a small menu.
 
-Two rules make the topology safe:
+- **LLM owns strategic decisions:** complete seed-deck composition and order,
+  economy vs. defence, plant composition, lane priorities, placement,
+  shovel/replacement, multi-step plans and responses to viewers.
+- **Runtime owns housekeeping:** collect expiring sun, collect opportunistic sun
+  when the model deliberately waits or has no actionable plan, enter adventure,
+  advance after a confirmed win, and dismiss chooser-free intro dialogue.
+- **Runtime owns constraints:** validate model output against the latest
+  snapshot and audience challenge bans. The native bridge validates engine
+  legality again.
+- **Pi is the model runtime:** one persistent, tool-free session handles seed
+  selection, gameplay strategy, tactical actions, audience context and speech.
+- **HeuristicAgent is fallback only:** deterministic and useful for offline
+  simulation; it is not the default live strategy.
 
-- **The Mac bridge only listens on loopback.** There is no inbound path from the
-  internet, and the token is required on every request.
-- **The game thread owns all state.** HTTP threads never touch a `Board`; they can
-  only enqueue a command and wait for the game thread's receipt.
+There is no automatic emergency plant-placement policy. If the model is
+unavailable, the controller waits and retries instead of silently taking over
+the character's strategic role.
 
-## 2. Control cycle
+## 2. Control topology
 
-`Orchestrator.step()` is the only place that decides. It is idempotent with respect
-to state: everything it needs is re-read each cycle.
+\`\`\`
+PvZ-Portable engine
+  → Native Bridge (game-thread snapshot / command validation)
+  → Game Observer (bounded snapshot projection)
+  → Pi Brain (seed deck OR strategy + up to 5 tentative actions + Chinese speech)
+  → Action Validator (revision, chooser rules, card, sun, cooldown, cell, challenge)
+  → ActionExecutor (single-flight, at-most-once, journal)
+  → Native Bridge
+  → fresh snapshot / verified outcome
+  → Pi Brain (continue or revise plan)
+\`\`\`
 
-1. **Read.** `game.snapshot()` → `normalizeSnapshot`. Reads may be retried; a
-   revision that moves backwards is a hard contract error.
-2. **Reconcile.** `ActionExecutor.observe(snapshot)` resolves the previous command:
-   the observable effect is present → `verified`; absent after N revisions →
-   `abandoned`. Nothing is retried.
-3. **Terminal handling.** `lost` ends the session. `won` emits `next_level` on the
-   wire (this is the only "no model" level decision) or finishes the campaign.
-4. **Priority ladder.** urgent sun (about to expire) → emergency defence near the
-   house → agent choice → opportunistic sun banking. A cycle issues **at most one**
-   command, because confirming it needs a later snapshot.
-5. **Narration** reacts to verified events only, rate-limited, and never blocks the
-   loop.
+The bridge remains loopback-only and all board mutation remains on the game
+thread. HTTP worker threads only enqueue commands.
 
-## 3. Invariants
+## 3. Model-selected seed deck
 
-| # | Invariant | Enforced by | Test |
-|---|---|---|---|
-| I1 | An action is only sent if it is legal for the observed revision | `policy/contract.validateAction` | `contract.test.mjs` |
-| I2 | At most one command is in flight | `ActionExecutor.pending` | `executor.test.mjs` |
-| I3 | A command id is never replayed | executor + bridge dedupe map | `executor.test.mjs`, `core_test.cpp` |
-| I4 | Success requires the effect in a fresh snapshot | `effectVisible` + `revisionAfter` | `executor.test.mjs` |
-| I5 | Revisions never decrease; applied commands advance them | contract + bridge `Commit` | `contract.test.mjs`, `core_test.cpp` |
-| I6 | Model output can only select an offered index | policy + `#decide` | `contract.test.mjs` |
-| I7 | Audience bans are re-checked at the engine | policy + `BridgeCore::Validate` | `contract.test.mjs`, `core_test.cpp` |
-| I8 | A stalled lane is not fed plants forever | `lost()` in the agent + emergency guard | `campaign.test.mjs` |
-| I9 | Stuck detection stops a runaway session | `maxCommandsPerLevel` | `campaign.test.mjs` |
+At every actual seed chooser, the bridge reports:
 
-The native side re-validates every action: bounds, occupancy, card presence,
-cooldown and sun. Even a compromised controller cannot plant into an occupied cell
-or spend sun it does not have.
+- exact seed-bank slot count;
+- all currently unlocked and level-allowed plants that can be selected;
+- sun cost and per-plant stage warnings;
+- upgrade dependencies (for example, Gatling Pea requires Repeater);
+- preselected plants and mandatory Crazy Dave tutorial picks;
+- whether chooser animations have finished and the deck can be applied.
 
-## 4. Failure model
+The same Pi session chooses an ordered list of exactly the required number of
+unique plant IDs. Warnings are strategic advice, not automatic bans. Mandatory
+picks, unavailable plants, challenge bans and upgrade dependencies are hard
+constraints. The runtime never chooses a default deck.
 
-| Failure | Client behaviour | Engine contract |
-|---|---|---|
-| Connection refused / 5xx / timeout | command becomes **ambiguous**; never resent | may have applied |
-| HTTP 4xx | deterministic reject, no retry | not applied |
-| Receipt `rejected` | journal + free slot | not applied |
-| Receipt `applied`, effect not visible yet | wait for a later snapshot | applied |
-| Effect never appears | abandon intent, resume from fresh state | unknown |
-| Bridge dies mid-session | loop keeps retrying reads, then stops after N failures | — |
-| Controller restarts | `pendingFromJournal` recovers the intent | — |
+Imitater is excluded until its secondary plant-type choice is represented in
+the bridge protocol. Survival repicks are surfaced even when the coarse game
+status is paused or playing.
 
-`ambiguous` is the important case: a double-plant would waste sun and desync the
-journal, so the executor prefers to lose an action over duplicating one.
+A level without a chooser (for example, a conveyor level) follows the
+chooser-free intro transition with an empty deck. Crazy Dave dialogue is
+advanced by the runtime as lifecycle work; the model is asked to choose only
+after the actual chooser is ready.
 
-## 5. Security
+## 4. Rolling-horizon gameplay planning
 
-- Bridge binds `127.0.0.1` only; rejects non-loopback client URLs as well.
-- Bearer token ≥ 16 chars from `BIGFISH_BRIDGE_TOKEN`; missing token disables the
-  bridge. Comparison is length-independent.
-- Request bodies capped at 64 KiB, headers at 8 KiB, response bodies at 256 KiB on
-  the client side; JSON depth capped at 16.
-- No tool/file/network access in either Pi session (`noTools: "all"`); unexpected
-  tools abort session creation.
-- Audience text is untrusted context: it never becomes a model instruction, and its
-  only effect is a validated vote or challenge.
-- Douyin callbacks must arrive through an authenticated gateway; the verifier is
-  defence in depth, not the primary boundary.
+During play the model returns a goal, short rationale, a plan of 0–5 actions
+and one livestream line. The supported gameplay action vocabulary is:
 
-## 6. Observation model
+- plant: choose any currently held seed and any board coordinate.
+- shovel: remove a plant at a board coordinate.
 
-The model sees `viewForModel(snapshot)`: level, wave, sun, bounded plant/zombie/card/
-sun lists, per-row threat summary. It never sees hidden future waves, raw memory,
-filesystem paths or unfiltered chat. Candidates arrive as an ordered array; the
-model answers `{"index":n,"speech":"…"}` and stale indices are rejected.
+The model does not receive a precomputed candidate list and does not choose
+an integer index. The runtime attaches gameId and revision, validates the
+first action, and executes only that action. After the next fresh snapshot, it
+reassesses the remaining plan. A plan is discarded on level/wave changes,
+material threat changes, audience-context changes, age limit or an illegal next
+action. At most one game command is in flight.
 
-## 7. Douyin topology (M1, not built)
+A future plan is a proposal, not a macro. Never blindly execute all planned
+actions against an old board state.
 
-```
-approved live-play room
-  → official signed callback (HTTP POST, <2s ACK)
-  → HTTPS cloud relay (durable queue, dedupe, replay protection)
-  → authenticated outbound connection initiated by the Mac
-  → AudienceDirector
-```
+## 5. Housekeeping versus strategy
 
-The Mac never exposes a public port. Official live-play packages currently target
-Windows EXE clients; the Mac+companion arrangement is unverified and must be
-confirmed with the platform before claiming official support.
+Automatic operations:
 
-## 8. Deliberate non-goals
+- collect sun that is about to expire;
+- collect available sun when the model deliberately waits or has no actionable
+  plan;
+- enter adventure and advance after a confirmed win;
+- dismiss Crazy Dave / chooser-free intro transitions without selecting plants.
 
-- No memory reading, no DLL injection, no OS-level input automation.
-- No retry of ambiguous actions.
-- No LLM authority over legality, economy, or challenges.
-- No packaged EA/PopCap assets in this repository.
+LLM decisions:
+
+- choose the complete ordered seed deck at each real chooser;
+- decide whether to spend sun or save it;
+- choose what to plant, where and when;
+- decide whether to shovel/rebuild;
+- choose lane priorities, economy, defence, unusual tactics and responses to
+  viewer challenges.
+
+## 6. Single Pi session
+
+One in-memory Pi session carries the character and strategic context across
+turns. It is tool-free (noTools: all) and returns JSON only. The same
+session selects seed decks, proposes gameplay plans and writes livestream
+speech. Speech associated with an action is published only after that action is
+confirmed; deliberate-wait speech can be published immediately. This avoids
+maintaining a second narrator conversation with a different view of the match.
+
+## 7. Audience context
+
+Recent bounded viewer messages and poll summaries are passed to the model as
+untrusted context. They are preferences and suggestions, not instructions.
+Validated audience challenges (for example, temporary plant bans) remain hard
+constraints enforced by runtime policy before command submission. The native
+bridge independently enforces game-state legality; it does not interpret viewer
+challenges. Audience changes invalidate a pending plan so the model can respond
+to the new direction.
+
+## 8. Safety invariants
+
+1. The engine is the source of truth; controller never mutates game memory.
+2. Every action is validated against the current gameId and revision.
+3. The native bridge revalidates chooser state, slot count, unlocked plants,
+   mandatory picks, upgrade dependencies, bounds, occupancy, card, cooldown
+   and sun.
+4. Runtime enforces audience challenge bans before submission.
+5. At most one command is in flight.
+6. Ambiguous commands are never resent with the same command id.
+7. Success is only announced after a fresh snapshot verifies the effect.
+8. Model output is bounded JSON; gameplay plans contain only plant/shovel
+   actions and deck decisions contain only validated plant IDs.
+9. Viewer messages are untrusted and cannot change system instructions.
+10. A stalled/invalid model response never bypasses action validation.
+
+## 9. Failure behaviour
+
+- Model timeout/error: no speculative action; collect available sun if useful,
+  otherwise wait and retry after a cooldown. No default deck or emergency plant
+  is inserted.
+- Invalid model action/deck: reject the proposal, record the reason and ask the
+  model again on a later cycle.
+- Command timeout: keep the intent pending until a fresh snapshot verifies or
+  abandons it; never replay the old command id.
+- Bridge read failure: bounded retries, then stop through the existing failure
+  path.
+- Simulation mode can continue using the deterministic heuristic fallback.
+
+## 10. Douyin integration
+
+AudienceDirector currently handles bounded messages, deduplicated votes and
+validated challenge bans. The existing official callback / relay integration
+remains a separate delivery task; this refactor makes the AI decision interface
+ready to consume those events.

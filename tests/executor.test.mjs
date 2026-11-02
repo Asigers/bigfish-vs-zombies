@@ -160,3 +160,86 @@ test("next_level is confirmed by a level transition", async () => {
   const verified = executor.observe(state({revision: 11, level: 3, status: STATUS.PLAYING}))
   assert.equal(verified.outcome, OUTCOME.VERIFIED)
 })
+
+test("chooser-free intro acknowledgement reconciles when the real chooser appears", async () => {
+  const game = new ScriptedGame(async (command) => ({
+    commandId: command.commandId, status: "accepted", revisionBefore: 1, revisionAfter: 1
+  }))
+  const executor = new ActionExecutor({game, newId: () => "cmd-dave"})
+  const intro = state({status: STATUS.INTRO, cards: [], seedChooser: null})
+  const action = {
+    type: ACTION.CHOOSE_SEEDS,
+    plants: [],
+    gameId: intro.gameId,
+    revision: intro.revision
+  }
+  const submitted = await executor.submit(intro, action)
+  assert.equal(submitted.outcome, OUTCOME.ACKNOWLEDGED)
+
+  const chooser = {
+    active: true,
+    ready: true,
+    slots: 2,
+    availablePlants: [
+      {type: "sunflower", cost: 50, recommended: true, warnings: [], requirements: []},
+      {type: "peashooter", cost: 100, recommended: true, warnings: [], requirements: []}
+    ],
+    preselected: [],
+    required: []
+  }
+  const next = state({revision: 2, status: STATUS.INTRO, cards: [], seedChooser: chooser})
+  const verified = executor.observe(next)
+  assert.equal(verified.outcome, OUTCOME.VERIFIED)
+  assert.equal(executor.ready, true)
+})
+
+test("model-selected deck is verified only after the ordered bank is visible and chooser closes", async () => {
+  const game = new ScriptedGame(async (command) => ({
+    commandId: command.commandId, status: "applied", revisionBefore: 1, revisionAfter: 2
+  }))
+  const executor = new ActionExecutor({game, newId: () => "cmd-deck"})
+  const chooser = {
+    active: true,
+    ready: true,
+    slots: 2,
+    availablePlants: [
+      {type: "sunflower", cost: 50, recommended: true, warnings: [], requirements: []},
+      {type: "peashooter", cost: 100, recommended: true, warnings: [], requirements: []}
+    ],
+    preselected: [],
+    required: []
+  }
+  const intro = state({status: STATUS.INTRO, cards: [], seedChooser: chooser})
+  const action = {
+    type: ACTION.CHOOSE_SEEDS,
+    plants: ["sunflower", "peashooter"],
+    gameId: intro.gameId,
+    revision: intro.revision
+  }
+  const submitted = await executor.submit(intro, action)
+  assert.equal(submitted.outcome, OUTCOME.ACKNOWLEDGED)
+
+  const stillChoosing = state({
+    revision: 2,
+    status: STATUS.INTRO,
+    cards: [
+      {type: "sunflower", cost: 50, ready: true},
+      {type: "peashooter", cost: 100, ready: true}
+    ],
+    seedChooser: chooser
+  })
+  assert.equal(executor.observe(stillChoosing), null)
+
+  const playing = state({
+    revision: 3,
+    status: STATUS.PLAYING,
+    cards: [
+      {type: "sunflower", cost: 50, ready: true},
+      {type: "peashooter", cost: 100, ready: true}
+    ],
+    seedChooser: null
+  })
+  const verified = executor.observe(playing)
+  assert.equal(verified.outcome, OUTCOME.VERIFIED)
+  assert.equal(executor.ready, true)
+})

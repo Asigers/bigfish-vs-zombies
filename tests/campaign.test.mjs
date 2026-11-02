@@ -12,9 +12,9 @@ import {Orchestrator} from "../src/runtime/orchestrator.mjs"
  * bridge. Simulator levels are not evidence for the native game (see
  * docs/M0-STATUS.md); they are evidence that the control loop is correct.
  */
-function harness({seed = 7, levels = 10, agent = new HeuristicAgent(), tick = 250, config = {}} = {}) {
+function harness({seed = 7, levels = 10, agent = new HeuristicAgent(), tick = 250, config = {}, startInIntro = false, seedSlots = 4} = {}) {
   const clock = {ms: 0, now() { return this.ms }}
-  const sim = new SimulatedGame({seed, levels, now: () => clock.ms})
+  const sim = new SimulatedGame({seed, levels, now: () => clock.ms, startInIntro, seedSlots})
   const records = []
   const journal = {append: (record) => records.push(record), flush: async () => {}, close: async () => {}}
   let seq = 0
@@ -178,4 +178,107 @@ test("a lost engine state stops the controller cleanly", async () => {
   }
   assert.equal(orchestrator.finished.reason, "lost")
   assert.equal(orchestrator.finished.level, 4)
+})
+
+test("an active seed chooser delegates the complete ordered deck to the agent", async () => {
+  let selections = 0
+  const agent = {
+    async selectDeck({seedChooser}) {
+      selections += 1
+      assert.equal(seedChooser.active, true)
+      assert.equal(seedChooser.ready, true)
+      assert.equal(seedChooser.slots, 3)
+      return {
+        plants: ["sunflower", "peashooter", "wallnut"],
+        strategy: "经济优先并保留基础防线",
+        speech: "先搭好经济和基础防线。"
+      }
+    },
+    async decide() { return null }
+  }
+  const {clock, sim, executor, orchestrator} = harness({
+    levels: 1,
+    agent,
+    startInIntro: true,
+    seedSlots: 3
+  })
+  clock.ms += 250
+  const first = await orchestrator.step()
+  assert.equal(first.state, "deck_selection")
+  assert.equal(selections, 1)
+  assert.equal(sim.snapshot().status, "playing")
+  assert.deepEqual(sim.snapshot().cards.map((card) => card.type), [
+    "sunflower", "peashooter", "wallnut"
+  ])
+
+  clock.ms += 250
+  await orchestrator.step()
+  assert.deepEqual(orchestrator.summary().deck, ["sunflower", "peashooter", "wallnut"])
+  assert.equal(orchestrator.summary().deckStrategy, "经济优先并保留基础防线")
+  assert.equal(orchestrator.summary().deckHistory.length, 1)
+  assert.equal(executor.pending, null)
+})
+
+test("runtime never invents a default deck when the agent cannot choose one", async () => {
+  const agent = {async decide() { return null }}
+  const {clock, sim, executor, orchestrator} = harness({
+    levels: 1,
+    agent,
+    startInIntro: true,
+    seedSlots: 3
+  })
+  clock.ms += 250
+  const result = await orchestrator.step()
+  assert.equal(result.state, "deck_selection_unavailable")
+  assert.equal(sim.snapshot().status, "intro")
+  assert.equal(sim.snapshot().cards.length, 0)
+  assert.equal(executor.pending, null)
+})
+
+test("the model chooses a fresh ordered deck for every level and receives deck history", async () => {
+  const fallback = new HeuristicAgent()
+  const decks = [
+    ["sunflower", "peashooter", "wallnut", "snowpea"],
+    ["sunflower", "snowpea", "wallnut", "peashooter"]
+  ]
+  const selections = []
+  const agent = {
+    async selectDeck({seedChooser, context}) {
+      const index = selections.length
+      selections.push({
+        slots: seedChooser.slots,
+        previousDeck: [...context.previousDeck],
+        deckHistory: context.deckHistory.map((entry) => ({
+          level: entry.level,
+          deck: [...entry.deck],
+          strategy: entry.strategy
+        }))
+      })
+      return {
+        plants: decks[index],
+        strategy: "level-" + (index + 1),
+        speech: ""
+      }
+    },
+    async decide(args) {
+      return fallback.decide(args)
+    }
+  }
+  const {orchestrator, run} = harness({
+    levels: 2,
+    agent,
+    startInIntro: true,
+    seedSlots: 4
+  })
+  await run(12_000)
+
+  assert.equal(orchestrator.finished.reason, "campaign_complete")
+  assert.equal(selections.length, 2, "each real chooser must invoke model deck selection")
+  assert.equal(selections[0].slots, 4)
+  assert.deepEqual(selections[0].previousDeck, [])
+  assert.deepEqual(selections[1].previousDeck, decks[0])
+  assert.deepEqual(selections[1].deckHistory, [
+    {level: 1, deck: decks[0], strategy: "level-1"}
+  ])
+  assert.deepEqual(orchestrator.summary().deckHistory.map((entry) => entry.deck), decks)
 })

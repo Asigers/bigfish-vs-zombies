@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -92,10 +93,51 @@ public:
 		return Issue::None;
 	}
 
-	Issue ChooseSeeds() override
+	Issue ChooseSeeds(const std::vector<std::string>& thePlants) override
 	{
-		if (state_.status != Status::Intro)
+		if (state_.status != Status::Intro && !(state_.seedChooser.active &&
+			(state_.status == Status::Playing || state_.status == Status::Paused)))
 			return Issue::NoSeedChooser;
+		if (state_.seedChooser.active)
+		{
+			if (!state_.seedChooser.ready)
+				return Issue::SeedChooserNotReady;
+			if (thePlants.size() != static_cast<std::size_t>(state_.seedChooser.slots))
+				return Issue::InvalidSeedSelection;
+			std::vector<std::string> aSelected;
+			state_.cards.clear();
+			for (const auto& aPlant : thePlants)
+			{
+				if (std::find(aSelected.begin(), aSelected.end(), aPlant) != aSelected.end())
+					return Issue::InvalidSeedSelection;
+				const auto aOption = std::find_if(state_.seedChooser.availablePlants.begin(),
+					state_.seedChooser.availablePlants.end(),
+					[&](const SeedOptionView& theOption) { return theOption.type == aPlant; });
+				if (aOption == state_.seedChooser.availablePlants.end())
+					return Issue::InvalidSeedSelection;
+				for (const auto& aRequired : aOption->requirements)
+				{
+					if (std::find(thePlants.begin(), thePlants.end(), aRequired) == thePlants.end())
+						return Issue::InvalidSeedSelection;
+				}
+				state_.cards.push_back(CardView{aPlant, aOption->cost, true});
+				aSelected.push_back(aPlant);
+			}
+			for (const auto& aRequired : state_.seedChooser.required)
+			{
+				if (std::find(aSelected.begin(), aSelected.end(), aRequired) == aSelected.end())
+					return Issue::InvalidSeedSelection;
+			}
+			state_.seedChooser.active = false;
+			state_.seedChooser.ready = false;
+			state_.seedChooser.availablePlants.clear();
+			state_.seedChooser.preselected.clear();
+			state_.seedChooser.required.clear();
+		}
+		else if (!thePlants.empty())
+		{
+			return Issue::InvalidSeedSelection;
+		}
 		state_.status = Status::Playing;
 		return Issue::None;
 	}
@@ -249,7 +291,37 @@ int main()
 		aIntro.status = Status::Intro;
 		Command aSeeds{"c10", 0, {"choose_seeds", "", "", 0, 0}};
 		Check(BridgeCore::Validate(aIntro, aSeeds).issue == Issue::None, "validate: choose seeds during intro");
-		Check(BridgeCore::Validate(aSnapshot, aSeeds).issue == Issue::NotPlaying, "validate: choose seeds needs intro");
+		Check(BridgeCore::Validate(aSnapshot, aSeeds).issue == Issue::NoSeedChooser, "validate: chooser-free seed action needs intro");
+
+		Snapshot aDeckIntro = aIntro;
+		aDeckIntro.seedChooser.active = true;
+		aDeckIntro.seedChooser.ready = true;
+		aDeckIntro.seedChooser.slots = 2;
+		aDeckIntro.seedChooser.availablePlants = {
+			SeedOptionView{"sunflower", 50, true, {}, {}},
+			SeedOptionView{"peashooter", 100, true, {}, {}},
+			SeedOptionView{"repeater", 200, true, {}, {}},
+			SeedOptionView{"gatlingpea", 250, false, {}, {"repeater"}}
+		};
+		aDeckIntro.seedChooser.required = {"sunflower"};
+		Command aDeck{"c11", 0, {"choose_seeds", "", "", 0, 0, {"sunflower", "peashooter"}}};
+		Check(BridgeCore::Validate(aDeckIntro, aDeck).issue == Issue::None, "validate: model-selected ordered deck");
+		Command aMissingBase{"c12", 0, {"choose_seeds", "", "", 0, 0, {"sunflower", "gatlingpea"}}};
+		Check(BridgeCore::Validate(aDeckIntro, aMissingBase).issue == Issue::InvalidSeedSelection,
+			"validate: upgrade requires its base plant");
+		Command aMissingRequired{"c13", 0, {"choose_seeds", "", "", 0, 0, {"peashooter", "repeater"}}};
+		Check(BridgeCore::Validate(aDeckIntro, aMissingRequired).issue == Issue::InvalidSeedSelection,
+			"validate: mandatory tutorial seed");
+		Command aDuplicateDeck{"c14", 0, {"choose_seeds", "", "", 0, 0, {"sunflower", "sunflower"}}};
+		Check(BridgeCore::Validate(aDeckIntro, aDuplicateDeck).issue == Issue::InvalidSeedSelection,
+			"validate: duplicate deck entries");
+		Snapshot aNotReady = aDeckIntro;
+		aNotReady.seedChooser.ready = false;
+		Check(BridgeCore::Validate(aNotReady, aDeck).issue == Issue::SeedChooserNotReady,
+			"validate: wait for chooser animations");
+		Command aEmptyDeck{"c15", 0, {"choose_seeds", "", "", 0, 0, {}}};
+		Check(BridgeCore::Validate(aDeckIntro, aEmptyDeck).issue == Issue::InvalidSeedSelection,
+			"validate: active chooser requires complete deck");
 	}
 
 	// ---- command lifecycle ----------------------------------------------
@@ -298,6 +370,41 @@ int main()
 			R"({"commandId":"a9","expectedRevision":1,"action":{"type":"dance"}})", aStatus);
 		Check(aStatus == 400 && Contains(aUnknown, "unsupported_action"), "core: unsupported action");
 
+		aPumping = false;
+		aPump.join();
+	}
+
+	// ---- model-selected seed deck ----------------------------------------
+	{
+		FakeFacade aFacade;
+		aFacade.state_.status = Status::Intro;
+		aFacade.state_.seedChooser.active = true;
+		aFacade.state_.seedChooser.ready = true;
+		aFacade.state_.seedChooser.slots = 2;
+		aFacade.state_.seedChooser.availablePlants = {
+			SeedOptionView{"sunflower", 50, true, {}, {}},
+			SeedOptionView{"peashooter", 100, true, {}, {}}
+		};
+		BridgeCore aCore(aFacade, "deck-test", 0);
+		std::atomic<bool> aPumping{true};
+		std::thread aPump([&] {
+			while (aPumping)
+			{
+				aCore.Pump();
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+		});
+		aCore.Pump();
+		int aStatus = 0;
+		const std::string aDeck = aCore.CommandEnvelope(
+			R"({"commandId":"deck1","expectedRevision":1,"action":{"type":"choose_seeds","plants":["sunflower","peashooter"]}})",
+			aStatus);
+		Check(aStatus == 200 && Contains(aDeck, "\"status\":\"applied\""),
+			"core: model-selected deck accepted");
+		const std::string aAfterDeck = aCore.SnapshotEnvelope();
+		Check(Contains(aAfterDeck, "\"status\":\"playing\""), "core: deck selection starts level");
+		Check(Contains(aAfterDeck, "\"type\":\"sunflower\""), "core: selected sunflower enters seed bank");
+		Check(Contains(aAfterDeck, "\"type\":\"peashooter\""), "core: selected peashooter enters seed bank");
 		aPumping = false;
 		aPump.join();
 	}

@@ -45,6 +45,8 @@ export const ISSUE = Object.freeze({
   SUN_MISSING: "sun_missing",
   NO_NEXT_LEVEL: "no_next_level",
   NO_SEED_CHOOSER: "no_seed_chooser",
+  SEED_CHOOSER_NOT_READY: "seed_chooser_not_ready",
+  INVALID_SEED_SELECTION: "invalid_seed_selection",
   DUPLICATE_COMMAND: "duplicate_command"
 })
 
@@ -157,6 +159,75 @@ export function normalizeSnapshot(raw) {
     return {row: insideRow(cell.row, `${at}.row`), col: insideCol(cell.col, `${at}.col`)}
   })
 
+  let seedChooser = null
+  if (raw.seedChooser !== undefined && raw.seedChooser !== null) {
+    const chooser = raw.seedChooser
+    if (!chooser || typeof chooser !== "object" || Array.isArray(chooser)) {
+      fail("snapshot.seedChooser", "expected object or null")
+    }
+    const active = bool(chooser.active, "snapshot.seedChooser.active")
+    const ready = bool(chooser.ready, "snapshot.seedChooser.ready")
+    const slots = int(chooser.slots ?? 0, "snapshot.seedChooser.slots", {min: 0, max: 10})
+    const availablePlants = array(
+      chooser.availablePlants ?? [],
+      "snapshot.seedChooser.availablePlants",
+      49
+    ).map((option, i) => {
+      const at = `snapshot.seedChooser.availablePlants[${i}]`
+      if (!option || typeof option !== "object" || Array.isArray(option)) fail(at, "expected object")
+      const warnings = array(option.warnings ?? [], `${at}.warnings`, 8).map((warning, j) =>
+        text(warning, `${at}.warnings[${j}]`, {max: 80}))
+      const requirements = array(option.requirements ?? [], `${at}.requirements`, 8).map((required, j) =>
+        text(required, `${at}.requirements[${j}]`, {max: 32}))
+      return Object.freeze({
+        type: text(option.type, `${at}.type`, {max: 32}),
+        cost: int(option.cost, `${at}.cost`, {min: 0, max: 2000}),
+        recommended: bool(option.recommended, `${at}.recommended`),
+        warnings: Object.freeze(warnings),
+        requirements: Object.freeze(requirements)
+      })
+    })
+    const names = (value, path) => Object.freeze(
+      array(value ?? [], path, 10).map((item, i) => text(item, `${path}[${i}]`, {max: 32}))
+    )
+    const preselected = names(chooser.preselected, "snapshot.seedChooser.preselected")
+    const required = names(chooser.required, "snapshot.seedChooser.required")
+    if (active && (slots <= 0 || availablePlants.length < slots)) {
+      fail("snapshot.seedChooser", "active chooser must expose enough plants for every slot")
+    }
+    if (!active && ready) fail("snapshot.seedChooser.ready", "inactive chooser cannot be ready")
+    if (new Set(availablePlants.map((option) => option.type)).size !== availablePlants.length) {
+      fail("snapshot.seedChooser.availablePlants", "duplicate plant types")
+    }
+    if (required.length > slots) fail("snapshot.seedChooser.required", "more required plants than slots")
+    if (new Set(preselected).size !== preselected.length) {
+      fail("snapshot.seedChooser.preselected", "duplicate plant types")
+    }
+    if (new Set(required).size !== required.length) {
+      fail("snapshot.seedChooser.required", "duplicate plant types")
+    }
+    for (const plant of [...preselected, ...required]) {
+      if (!availablePlants.some((option) => option.type === plant)) {
+        fail("snapshot.seedChooser", "preselected or required plant is not available: " + plant)
+      }
+    }
+    for (const option of availablePlants) {
+      for (const requiredPlant of option.requirements) {
+        if (!availablePlants.some((candidate) => candidate.type === requiredPlant)) {
+          fail("snapshot.seedChooser.availablePlants", option.type + " has unavailable requirement " + requiredPlant)
+        }
+      }
+    }
+    seedChooser = Object.freeze({
+      active,
+      ready,
+      slots,
+      availablePlants: Object.freeze(availablePlants),
+      preselected,
+      required
+    })
+  }
+
   return Object.freeze({
     schema: SCHEMA_VERSION,
     gameId: text(raw.gameId, "snapshot.gameId", {max: 64}),
@@ -175,7 +246,8 @@ export function normalizeSnapshot(raw) {
     zombies: freezeAll(zombies),
     cards: freezeAll(cards),
     suns: freezeAll(suns),
-    blocked: freezeAll(blocked)
+    blocked: freezeAll(blocked),
+    seedChooser
   })
 }
 
@@ -210,6 +282,8 @@ export function actionKey(action) {
       return `sun:${action.id}`
     case ACTION.SHOVEL:
       return `shovel:${action.row}:${action.col}`
+    case ACTION.CHOOSE_SEEDS:
+      return `choose_seeds:${Array.isArray(action.plants) ? action.plants.join(",") : String(action.plants ?? "")}`
     case ACTION.NEXT_LEVEL:
       return "next_level"
     default:
@@ -231,7 +305,39 @@ export function validateAction(snapshot, action, challenge = {}) {
     return snapshot.status === STATUS.MENU ? null : ISSUE.NOT_PLAYING
   }
   if (action.type === ACTION.CHOOSE_SEEDS) {
-    return snapshot.status === STATUS.INTRO ? null : ISSUE.NOT_PLAYING
+    const plants = action.plants ?? []
+    if (!Array.isArray(plants)) return ISSUE.INVALID_SEED_SELECTION
+    const chooser = snapshot.seedChooser
+    if (!chooser?.active) {
+      return snapshot.status === STATUS.INTRO && plants.length === 0
+        ? null
+        : ISSUE.NO_SEED_CHOOSER
+    }
+    if (![STATUS.INTRO, STATUS.PLAYING, STATUS.PAUSED].includes(snapshot.status)) {
+      return ISSUE.NOT_PLAYING
+    }
+    if (!chooser.ready) return ISSUE.SEED_CHOOSER_NOT_READY
+    if (plants.length !== chooser.slots) return ISSUE.INVALID_SEED_SELECTION
+    const selected = new Set()
+    for (const plant of plants) {
+      if (typeof plant !== "string" || !plant.trim() || selected.has(plant)) {
+        return ISSUE.INVALID_SEED_SELECTION
+      }
+      if ((challenge.bannedPlants ?? []).includes(plant)) return ISSUE.CHALLENGE_BAN
+      const option = chooser.availablePlants.find((candidate) => candidate.type === plant)
+      if (!option) return ISSUE.INVALID_SEED_SELECTION
+      selected.add(plant)
+    }
+    if (chooser.required.some((plant) => !selected.has(plant))) {
+      return ISSUE.INVALID_SEED_SELECTION
+    }
+    for (const plant of selected) {
+      const option = chooser.availablePlants.find((candidate) => candidate.type === plant)
+      if (option.requirements.some((required) => !selected.has(required))) {
+        return ISSUE.INVALID_SEED_SELECTION
+      }
+    }
+    return null
   }
   if (action.type === ACTION.NEXT_LEVEL) {
     if (snapshot.status !== STATUS.WON) return ISSUE.NOT_PLAYING

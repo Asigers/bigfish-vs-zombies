@@ -1,7 +1,7 @@
 /**
  * Turns controller events into one short line for the Live2D host.
  * Only confirmed facts speak: a rejected or unverified action never claims
- * success on stream.
+ * success on stream. Model-authored speech takes precedence over canned lines.
  */
 const PLANT_SPEECH = Object.freeze({
   sunflower: "补个向日葵",
@@ -25,16 +25,23 @@ export function speechForEvent(event, {level = 1} = {}) {
   const action = event.action ?? {}
   switch (event.type) {
     case "command_verified":
+      if (typeof event.speech === "string" && event.speech.trim()) {
+        return {
+          text: event.speech.trim(),
+          emotion: "happy",
+          goal: "第 " + level + " 关"
+        }
+      }
       if (action.type === "plant") {
         const verb = PLANT_SPEECH[action.plant] ?? "种下去"
         return {
-          text: `第${action.row}路，${verb}。`,
+          text: "第" + action.row + "路，" + verb + "。",
           emotion: PLANT_EMOTION[action.plant] ?? "happy",
-          goal: `第 ${level} 关防守`
+          goal: "第 " + level + " 关防守"
         }
       }
       if (action.type === "collect_sun") {
-        return {text: "阳光收下。", emotion: "happy", goal: `第 ${level} 关攒经济`}
+        return {text: "阳光收下。", emotion: "happy", goal: "第 " + level + " 关攒经济"}
       }
       if (action.type === "next_level") {
         return {text: "继续，下一关。", emotion: "excited", goal: "推进关卡"}
@@ -52,9 +59,9 @@ export function speechForEvent(event, {level = 1} = {}) {
       return {text: "刚才那一下没确认，稳住。", emotion: "thinking", goal: "核对状态"}
     case "level_summary":
       if (event.cleared) {
-        return {text: `第 ${event.level} 关，拿下！`, emotion: "excited", goal: "过关"}
+        return {text: "第 " + event.level + " 关，拿下！", emotion: "excited", goal: "过关"}
       }
-      return {text: `第 ${event.level} 关丢了，再来。`, emotion: "sad", goal: "复盘"}
+      return {text: "第 " + event.level + " 关丢了，再来。", emotion: "sad", goal: "复盘"}
     case "finished":
       if (event.reason === "campaign_complete") {
         return {text: "十关打完，收工！", emotion: "excited", goal: "完成"}
@@ -65,10 +72,10 @@ export function speechForEvent(event, {level = 1} = {}) {
       return null
     case "narration":
       return typeof event.text === "string" && event.text
-        ? {text: event.text, emotion: "happy", goal: `第 ${level} 关`}
+        ? {text: event.text, emotion: "happy", goal: "第 " + level + " 关"}
         : null
     case "agent_error":
-      return {text: "脑子有点卡，我先自己判断。", emotion: "tired", goal: "降级"}
+      return {text: "脑子有点卡，我先稳住。", emotion: "tired", goal: "模型重试"}
     default:
       return null
   }
